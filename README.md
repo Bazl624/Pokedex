@@ -1,8 +1,21 @@
-# Pokédex
+# Pokémon TCG Card Collection
 
-A small, modern Pokédex web app. Search for any Pokémon by name or number and see
-its artwork, types, height/weight, and base stats. Data comes from the free public
-[PokéAPI](https://pokeapi.co/) — no API key required.
+A small, modern web app for tracking your **Pokémon trading card** collection.
+Search real cards, record the ones you own along with their **condition**, and see
+an estimated total **value** of your collection. Card data and prices come from the
+free public [Pokémon TCG API](https://pokemontcg.io/) — no API key required for
+basic use.
+
+## Features
+
+- Search the Pokémon TCG catalog by card name (real images, sets, rarity).
+- See each card's market price (USD).
+- Add cards to your collection with a condition grade (NM / LP / MP / HP / DMG)
+  and quantity.
+- Automatic estimated value per card and a running total for the whole collection,
+  adjusted for condition.
+- Your collection is saved locally in the browser (localStorage), so it persists
+  between visits on the same device.
 
 ## Tech stack
 
@@ -36,8 +49,15 @@ index.html          # Vite entry HTML
 public/pokeball.svg  # favicon / logo
 src/
   main.tsx           # React entry point
-  App.tsx            # UI: search form + Pokémon card
+  App.tsx            # UI: tabs for Search + My Collection
   App.css            # component styles
   index.css          # global styles
-  pokeapi.ts         # PokéAPI client + types
+  tcgapi.ts          # Pokémon TCG API client + Card type
+  collection.ts      # collection model: conditions, values, localStorage
 ```
+
+## Notes on values
+
+Prices are the Near Mint market price from the TCG API, adjusted by a rough
+condition multiplier (NM 100%, LP 85%, MP 70%, HP 50%, DMG 30%). These are
+ballpark estimates; real market prices vary by grade, edition, and marketplace.

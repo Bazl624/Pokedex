@@ -1,143 +1,276 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import './App.css'
-import { fetchPokemon, type Pokemon } from './pokeapi'
+import { searchCards, type Card } from './tcgapi'
+import {
+  CONDITIONS,
+  CONDITION_LABELS,
+  CONDITION_MULTIPLIERS,
+  type Condition,
+  type CollectionItem,
+  addToCollection,
+  formatUsd,
+  itemValue,
+  loadCollection,
+  removeItem,
+  saveCollection,
+  setQuantity,
+  totalCards,
+  totalValue,
+} from './collection'
 
-const TYPE_COLORS: Record<string, string> = {
-  normal: '#a8a77a',
-  fire: '#ee8130',
-  water: '#6390f0',
-  electric: '#f7d02c',
-  grass: '#7ac74c',
-  ice: '#96d9d6',
-  fighting: '#c22e28',
-  poison: '#a33ea1',
-  ground: '#e2bf65',
-  flying: '#a98ff3',
-  psychic: '#f95587',
-  bug: '#a6b91a',
-  rock: '#b6a136',
-  ghost: '#735797',
-  dragon: '#6f35fc',
-  dark: '#705746',
-  steel: '#b7b7ce',
-  fairy: '#d685ad',
+type Tab = 'search' | 'collection'
+
+function ConditionSelect({
+  value,
+  onChange,
+  id,
+}: {
+  value: Condition
+  onChange: (c: Condition) => void
+  id?: string
+}) {
+  return (
+    <select
+      id={id}
+      className="condition-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value as Condition)}
+    >
+      {CONDITIONS.map((c) => (
+        <option key={c} value={c}>
+          {c} — {CONDITION_LABELS[c]}
+        </option>
+      ))}
+    </select>
+  )
 }
 
-const STAT_LABELS: Record<string, string> = {
-  hp: 'HP',
-  attack: 'Attack',
-  defense: 'Defense',
-  'special-attack': 'Sp. Atk',
-  'special-defense': 'Sp. Def',
-  speed: 'Speed',
+function SearchResult({
+  card,
+  onAdd,
+}: {
+  card: Card
+  onAdd: (card: Card, condition: Condition) => void
+}) {
+  const [condition, setCondition] = useState<Condition>('NM')
+  const estimated =
+    card.marketPrice == null
+      ? null
+      : card.marketPrice * CONDITION_MULTIPLIERS[condition]
+
+  return (
+    <li className="result">
+      {card.imageSmall ? (
+        <img className="result__img" src={card.imageSmall} alt={card.name} loading="lazy" />
+      ) : (
+        <div className="result__img result__img--empty">No image</div>
+      )}
+      <div className="result__body">
+        <h3 className="result__name">{card.name}</h3>
+        <p className="result__meta">
+          {card.setName} · #{card.number}
+          {card.rarity ? ` · ${card.rarity}` : ''}
+        </p>
+        <p className="result__price">
+          <span>NM market: {formatUsd(card.marketPrice)}</span>
+          {estimated != null && condition !== 'NM' && (
+            <span className="result__price-est"> · {condition}: {formatUsd(estimated)}</span>
+          )}
+        </p>
+        <div className="result__actions">
+          <ConditionSelect value={condition} onChange={setCondition} />
+          <button className="btn btn--add" onClick={() => onAdd(card, condition)}>
+            + Add
+          </button>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function CollectionRow({
+  item,
+  onQty,
+  onRemove,
+}: {
+  item: CollectionItem
+  onQty: (key: string, qty: number) => void
+  onRemove: (key: string) => void
+}) {
+  return (
+    <li className="crow">
+      {item.card.imageSmall ? (
+        <img className="crow__img" src={item.card.imageSmall} alt={item.card.name} loading="lazy" />
+      ) : (
+        <div className="crow__img crow__img--empty">No image</div>
+      )}
+      <div className="crow__body">
+        <h3 className="crow__name">{item.card.name}</h3>
+        <p className="crow__meta">
+          {item.card.setName} · #{item.card.number}
+        </p>
+        <span className={`badge badge--${item.condition.toLowerCase()}`}>
+          {item.condition} · {CONDITION_LABELS[item.condition]}
+        </span>
+      </div>
+      <div className="crow__right">
+        <div className="qty">
+          <button
+            className="qty__btn"
+            aria-label="Decrease quantity"
+            onClick={() => onQty(item.key, item.quantity - 1)}
+          >
+            −
+          </button>
+          <span className="qty__value">{item.quantity}</span>
+          <button
+            className="qty__btn"
+            aria-label="Increase quantity"
+            onClick={() => onQty(item.key, item.quantity + 1)}
+          >
+            +
+          </button>
+        </div>
+        <span className="crow__value">{formatUsd(itemValue(item))}</span>
+        <button
+          className="crow__remove"
+          aria-label={`Remove ${item.card.name}`}
+          onClick={() => onRemove(item.key)}
+        >
+          Remove
+        </button>
+      </div>
+    </li>
+  )
 }
 
 function App() {
+  const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
-  const [pokemon, setPokemon] = useState<Pokemon | null>(null)
+  const [results, setResults] = useState<Card[]>([])
+  const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [collection, setCollection] = useState<CollectionItem[]>(() => loadCollection())
 
-  async function handleSubmit(e: FormEvent) {
+  useEffect(() => {
+    saveCollection(collection)
+  }, [collection])
+
+  async function handleSearch(e: FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    setSearched(true)
     try {
-      const result = await fetchPokemon(query)
-      setPokemon(result)
+      setResults(await searchCards(query))
     } catch (err) {
-      setPokemon(null)
+      setResults([])
       setError(err instanceof Error ? err.message : 'Unexpected error')
     } finally {
       setLoading(false)
     }
   }
 
+  function handleAdd(card: Card, condition: Condition) {
+    setCollection((prev) => addToCollection(prev, card, condition))
+  }
+
+  const count = totalCards(collection)
+
   return (
     <div className="app">
       <header className="header">
         <img src="/pokeball.svg" alt="" className="logo" aria-hidden="true" />
-        <h1>Pokédex</h1>
-        <p className="tagline">Search for any Pokémon by name or number.</p>
+        <h1>Card Collection</h1>
+        <p className="tagline">Track your Pokémon TCG cards, conditions, and values.</p>
       </header>
 
-      <form className="search" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. pikachu or 25"
-          aria-label="Pokémon name or number"
-          autoFocus
-        />
-        <button type="submit" disabled={loading}>
-          {loading ? 'Searching…' : 'Search'}
+      <nav className="tabs">
+        <button
+          className={`tab ${tab === 'search' ? 'tab--active' : ''}`}
+          onClick={() => setTab('search')}
+        >
+          Search cards
         </button>
-      </form>
+        <button
+          className={`tab ${tab === 'collection' ? 'tab--active' : ''}`}
+          onClick={() => setTab('collection')}
+        >
+          My collection{count > 0 ? ` (${count})` : ''}
+        </button>
+      </nav>
 
-      {error && <p className="error" role="alert">{error}</p>}
-
-      {pokemon && (
-        <section className="card" aria-live="polite">
-          <div className="card__header">
-            <span className="card__id">#{String(pokemon.id).padStart(3, '0')}</span>
-            <h2 className="card__name">{pokemon.name}</h2>
-          </div>
-
-          {pokemon.spriteUrl ? (
-            <img
-              className="card__sprite"
-              src={pokemon.spriteUrl}
-              alt={pokemon.name}
-              width={240}
-              height={240}
+      {tab === 'search' && (
+        <section>
+          <form className="search" onSubmit={handleSearch}>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search a card, e.g. Charizard"
+              aria-label="Card name"
+              autoFocus
             />
-          ) : (
-            <div className="card__sprite card__sprite--empty">No image</div>
+            <button className="btn btn--primary" type="submit" disabled={loading}>
+              {loading ? 'Searching…' : 'Search'}
+            </button>
+          </form>
+
+          {error && <p className="error" role="alert">{error}</p>}
+
+          {!error && searched && !loading && results.length === 0 && (
+            <p className="hint">No cards found. Try another name.</p>
           )}
 
-          <div className="types">
-            {pokemon.types.map((type) => (
-              <span
-                key={type}
-                className="type"
-                style={{ backgroundColor: TYPE_COLORS[type] ?? '#777' }}
-              >
-                {type}
-              </span>
-            ))}
-          </div>
+          {!searched && !error && (
+            <p className="hint">Search for a card, choose its condition, and add it to your collection.</p>
+          )}
 
-          <div className="measurements">
-            <div>
-              <span className="measurements__label">Height</span>
-              <span className="measurements__value">{pokemon.height / 10} m</span>
-            </div>
-            <div>
-              <span className="measurements__label">Weight</span>
-              <span className="measurements__value">{pokemon.weight / 10} kg</span>
-            </div>
-          </div>
-
-          <ul className="stats">
-            {pokemon.stats.map((stat) => (
-              <li key={stat.name} className="stat">
-                <span className="stat__label">{STAT_LABELS[stat.name] ?? stat.name}</span>
-                <span className="stat__bar">
-                  <span
-                    className="stat__fill"
-                    style={{ width: `${Math.min(100, (stat.value / 255) * 100)}%` }}
-                  />
-                </span>
-                <span className="stat__value">{stat.value}</span>
-              </li>
+          <ul className="results">
+            {results.map((card) => (
+              <SearchResult key={card.id} card={card} onAdd={handleAdd} />
             ))}
           </ul>
         </section>
       )}
 
-      {!pokemon && !error && !loading && (
-        <p className="hint">Try “bulbasaur”, “charizard”, or “150”.</p>
+      {tab === 'collection' && (
+        <section>
+          <div className="summary">
+            <div>
+              <span className="summary__label">Cards</span>
+              <span className="summary__value">{count}</span>
+            </div>
+            <div>
+              <span className="summary__label">Est. value</span>
+              <span className="summary__value summary__value--money">
+                {formatUsd(totalValue(collection))}
+              </span>
+            </div>
+          </div>
+
+          {collection.length === 0 ? (
+            <p className="hint">
+              Your collection is empty. Head to “Search cards” to add some.
+            </p>
+          ) : (
+            <ul className="crows">
+              {collection.map((item) => (
+                <CollectionRow
+                  key={item.key}
+                  item={item}
+                  onQty={(key, qty) => setCollection((prev) => setQuantity(prev, key, qty))}
+                  onRemove={(key) => setCollection((prev) => removeItem(prev, key))}
+                />
+              ))}
+            </ul>
+          )}
+          <p className="disclaimer">
+            Values are estimates: Near Mint market price adjusted by condition. Actual
+            prices vary by grade, edition, and market.
+          </p>
+        </section>
       )}
     </div>
   )
