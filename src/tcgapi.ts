@@ -89,5 +89,13 @@ export async function searchCards(query: string): Promise<Card[]> {
   }
 
   const body = (await res.json()) as { data?: RawCard[] }
-  return (body.data ?? []).map(toCard)
+  const cards = (body.data ?? []).map(toCard)
+
+  // Surface cards that actually have a market price first — this app is about
+  // values, so priced results are the most useful to the collector.
+  return cards.sort((a, b) => {
+    const aHas = a.marketPrice != null ? 0 : 1
+    const bHas = b.marketPrice != null ? 0 : 1
+    return aHas - bHas
+  })
 }
