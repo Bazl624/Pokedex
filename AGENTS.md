@@ -18,6 +18,11 @@ than duplicating them here.
 ## Cursor Cloud specific instructions
 
 - Package manager is **pnpm** (see `pnpm-lock.yaml`). Use pnpm, not npm/yarn.
+- The pnpm version is pinned to `10.33.3` via the `packageManager` field in
+  `package.json`; the VM ships this version through a corepack shim. Do NOT run
+  `corepack enable pnpm` without that pin present — an unpinned corepack pulls the
+  latest pnpm (11.x), which ignores `pnpm.onlyBuiltDependencies` and aborts trying
+  to purge the pnpm-10 `node_modules` in a non-TTY shell.
 - pnpm 10 blocks dependency build scripts by default. `esbuild` (required by Vite)
   is explicitly allowlisted via `pnpm.onlyBuiltDependencies` in `package.json`, so
   a plain `pnpm install` runs its postinstall automatically. Do not run the
