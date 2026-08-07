@@ -110,6 +110,53 @@ export function removeItem(items: CollectionItem[], key: string): CollectionItem
   return items.filter((i) => i.key !== key)
 }
 
+/** Escape a value for CSV (RFC 4180): quote if it contains comma/quote/newline. */
+function csvField(value: string | number): string {
+  const s = String(value)
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+/**
+ * Serialize the collection to CSV text (one row per card+condition line).
+ * A UTF-8 BOM is prepended by the caller so spreadsheets read accents (é) right.
+ */
+export function collectionToCsv(items: CollectionItem[]): string {
+  const headers = [
+    'Name',
+    'Set',
+    'Number',
+    'Rarity',
+    'Condition',
+    'Condition Label',
+    'Quantity',
+    'NM Market (USD)',
+    'Est. Unit Value (USD)',
+    'Est. Line Value (USD)',
+    'Card ID',
+  ]
+  const rows = items.map((it) => {
+    const nm = it.card.marketPrice
+    const unit = nm == null ? '' : (nm * CONDITION_MULTIPLIERS[it.condition]).toFixed(2)
+    const line = nm == null ? '' : itemValue(it).toFixed(2)
+    return [
+      it.card.name,
+      it.card.setName,
+      it.card.number,
+      it.card.rarity ?? '',
+      it.condition,
+      CONDITION_LABELS[it.condition],
+      it.quantity,
+      nm == null ? '' : nm.toFixed(2),
+      unit,
+      line,
+      it.card.id,
+    ]
+      .map(csvField)
+      .join(',')
+  })
+  return [headers.map(csvField).join(','), ...rows].join('\r\n')
+}
+
 export function formatUsd(value: number | null): string {
   if (value == null) return '—'
   return new Intl.NumberFormat('en-US', {

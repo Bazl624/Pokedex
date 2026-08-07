@@ -535,6 +535,12 @@
   color: #7ee2a8;
 }
 
+.collection-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
 /* Collection rows */
 .crow__body {
   display: flex;

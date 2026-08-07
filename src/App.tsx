@@ -10,6 +10,7 @@ import {
   type Condition,
   type CollectionItem,
   addToCollection,
+  collectionToCsv,
   formatUsd,
   itemValue,
   loadCollection,
@@ -402,6 +403,20 @@ function App() {
     setCollection((prev) => addToCollection(prev, card, condition))
   }
 
+  function handleExportCsv() {
+    // Prepend a UTF-8 BOM so Excel/Sheets render accented names correctly.
+    const csv = '\uFEFF' + collectionToCsv(collection)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `pokemon-tcg-collection-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   const count = totalCards(collection)
 
   return (
@@ -494,6 +509,14 @@ function App() {
               </span>
             </div>
           </div>
+
+          {collection.length > 0 && (
+            <div className="collection-toolbar">
+              <button className="btn btn--ghost" onClick={handleExportCsv}>
+                ⬇ Export CSV
+              </button>
+            </div>
+          )}
 
           {collection.length === 0 ? (
             <p className="hint">
