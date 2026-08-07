@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
-import { searchCards, type Card } from './tcgapi'
+import { fetchCardById, searchCards, type Card } from './tcgapi'
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
@@ -10,10 +10,13 @@ import {
   type Condition,
   type CollectionItem,
   addToCollection,
+  collectionTemplateCsv,
   collectionToCsv,
   formatUsd,
   itemValue,
   loadCollection,
+  mergeImportRows,
+  parseCollectionCsv,
   removeItem,
   saveCollection,
   setQuantity,
@@ -150,12 +153,30 @@ function CollectionRow({
 function cameraErrorMessage(err: unknown): string {
   const name = err instanceof DOMException ? err.name : ''
   if (name === 'NotAllowedError' || name === 'SecurityError') {
-    return 'Camera access was blocked. Allow camera permission and try again.'
+    return 'Camera access was blocked. Allow camera permission, or use “Take photo” below.'
   }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-    return 'No camera was found on this device.'
+    return 'Live camera unavailable. Use “Take photo” below — it opens your phone camera.'
   }
-  return 'Could not start the camera on this device.'
+  return 'Live camera unavailable. Use “Take photo” below — it opens your phone camera.'
+}
+
+/**
+ * Start the rear camera when possible. Uses `ideal` (not required) facingMode
+ * so iOS doesn't reject the request, then falls back to any camera.
+ */
+async function startCameraStream(): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new DOMException('getUserMedia unavailable', 'NotSupportedError')
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    })
+  } catch {
+    return await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  }
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -165,6 +186,18 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(file)
   })
+}
+
+function downloadTextFile(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 function CameraScanner({
@@ -178,19 +211,13 @@ function CameraScanner({
   const streamRef = useRef<MediaStream | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setErr('Live camera needs a secure (https) connection. You can still choose a photo below.')
-        return
-      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        })
+        const stream = await startCameraStream()
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
@@ -198,7 +225,10 @@ function CameraScanner({
         streamRef.current = stream
         if (videoRef.current) {
           videoRef.current.srcObject = stream
+          videoRef.current.setAttribute('playsinline', 'true')
+          videoRef.current.muted = true
           await videoRef.current.play()
+          setReady(true)
         }
       } catch (e) {
         setErr(cameraErrorMessage(e))
@@ -231,6 +261,7 @@ function CameraScanner({
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    e.target.value = ''
     stopCamera()
     onCapture(await readFileAsDataUrl(file))
   }
@@ -257,23 +288,33 @@ function CameraScanner({
         ) : (
           <>
             <div className="scanner__viewport">
-              <video ref={videoRef} playsInline muted className="scanner__video" />
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                autoPlay
+                className="scanner__video"
+              />
               <div className="scanner__frame" aria-hidden="true" />
             </div>
             <p className="scanner__hint">
-              Line the card up inside the frame, then capture.
+              Line the card up inside the frame, then capture. Or tap “Take photo”
+              to use your phone’s camera app.
             </p>
           </>
         )}
 
         <div className="scanner__actions">
           {!err && (
-            <button className="btn btn--primary" onClick={capture}>
-              Capture
+            <button className="btn btn--primary" onClick={capture} disabled={!ready}>
+              {ready ? 'Capture' : 'Starting camera…'}
             </button>
           )}
+          <button className="btn btn--primary" onClick={() => fileRef.current?.click()}>
+            📷 Take photo
+          </button>
           <button className="btn btn--ghost" onClick={() => fileRef.current?.click()}>
-            Choose a photo
+            Choose from library
           </button>
         </div>
 
@@ -363,15 +404,8 @@ function ScanSession({
   useEffect(() => {
     let cancelled = false
     async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setCamErr('Live camera needs a secure (https) connection. Use "Choose a photo" to add cards here.')
-        return
-      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        })
+        const stream = await startCameraStream()
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
@@ -379,6 +413,8 @@ function ScanSession({
         streamRef.current = stream
         if (videoRef.current) {
           videoRef.current.srcObject = stream
+          videoRef.current.setAttribute('playsinline', 'true')
+          videoRef.current.muted = true
           await videoRef.current.play()
         }
       } catch (e) {
@@ -484,7 +520,13 @@ function ScanSession({
           {camErr ? (
             <div className="session__camerr">{camErr}</div>
           ) : (
-            <video ref={videoRef} playsInline muted className="scanner__video" />
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="scanner__video"
+            />
           )}
           {!camErr && phase === 'capture' && <div className="scanner__frame" aria-hidden="true" />}
 
@@ -556,8 +598,11 @@ function ScanSession({
                 Capture
               </button>
             )}
+            <button className="btn btn--primary" onClick={() => fileRef.current?.click()}>
+              📷 Take photo
+            </button>
             <button className="btn btn--ghost" onClick={() => fileRef.current?.click()}>
-              Choose a photo
+              Choose from library
             </button>
           </div>
         )}
@@ -595,23 +640,49 @@ function App() {
   const [scanBusy, setScanBusy] = useState(false)
   const [sessionOpen, setSessionOpen] = useState(false)
   const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const importRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     saveCollection(collection)
   }, [collection])
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
+
   async function runSearch(term: string) {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     setError(null)
     setSearched(true)
     try {
-      setResults(await searchCards(term))
+      setResults(await searchCards(term, controller.signal))
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('Search cancelled.')
+        return
+      }
       setResults([])
       setError(err instanceof Error ? err.message : 'Unexpected error')
     } finally {
-      setLoading(false)
+      if (abortRef.current === controller) {
+        setLoading(false)
+        abortRef.current = null
+      }
     }
+  }
+
+  function cancelSearch() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
   }
 
   async function handleScanCapture(dataUrl: string) {
@@ -650,22 +721,81 @@ function App() {
   function handleExportCsv() {
     // Prepend a UTF-8 BOM so Excel/Sheets render accented names correctly.
     const csv = '\uFEFF' + collectionToCsv(collection)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `pokemon-tcg-collection-${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    downloadTextFile(
+      `pokemon-tcg-collection-${new Date().toISOString().slice(0, 10)}.csv`,
+      csv,
+      'text/csv;charset=utf-8;',
+    )
+  }
+
+  function handleDownloadTemplate() {
+    downloadTextFile(
+      'pokemon-tcg-collection-template.csv',
+      '\uFEFF' + collectionTemplateCsv(),
+      'text/csv;charset=utf-8;',
+    )
+  }
+
+  async function handleImportCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImportBusy(true)
+    setImportMsg(null)
+    try {
+      const text = await file.text()
+      const parsed = parseCollectionCsv(text)
+      if (parsed.rows.length === 0) {
+        setImportMsg(
+          parsed.errors[0] ??
+            'No valid rows found. Download the CSV template for the expected format.',
+        )
+        return
+      }
+
+      const resolved: { card: Card; condition: Condition; quantity: number }[] = []
+      const lookupErrors: string[] = [...parsed.errors]
+
+      for (const row of parsed.rows) {
+        try {
+          const card = await fetchCardById(row.cardId)
+          if (!card) {
+            lookupErrors.push(
+              `Line ${row.lineNumber}: unknown Card ID "${row.cardId}"${row.name ? ` (${row.name})` : ''}.`,
+            )
+            continue
+          }
+          resolved.push({ card, condition: row.condition, quantity: row.quantity })
+        } catch {
+          lookupErrors.push(
+            `Line ${row.lineNumber}: could not look up Card ID "${row.cardId}".`,
+          )
+        }
+      }
+
+      if (resolved.length > 0) {
+        setCollection((prev) => mergeImportRows(prev, resolved))
+      }
+
+      const parts = [`Imported ${resolved.length} of ${parsed.rows.length} row(s).`]
+      if (lookupErrors.length > 0) {
+        parts.push(`${lookupErrors.length} issue(s): ${lookupErrors.slice(0, 3).join(' ')}`)
+        if (lookupErrors.length > 3) parts.push('…')
+      }
+      setImportMsg(parts.join(' '))
+    } catch {
+      setImportMsg('Could not read that CSV file. Download the template and try again.')
+    } finally {
+      setImportBusy(false)
+    }
   }
 
   const count = totalCards(collection)
+  const isHomeEmpty = tab === 'search' && !searched && !loading && !error && results.length === 0
 
   return (
     <>
-      <div className="app">
+      <div className={`app${isHomeEmpty ? ' app--home' : ''}`}>
       <header className="header">
         <img
           src={`${import.meta.env.BASE_URL}pokeball.svg`}
@@ -699,7 +829,7 @@ function App() {
       </nav>
 
       {tab === 'search' && (
-        <section>
+        <section className={isHomeEmpty ? 'home-panel' : undefined}>
           <form className="search" onSubmit={handleSearch}>
             <input
               type="text"
@@ -709,9 +839,15 @@ function App() {
               aria-label="Card name"
               autoFocus
             />
-            <button className="btn btn--primary" type="submit" disabled={loading}>
-              {loading ? 'Searching…' : 'Search'}
-            </button>
+            {loading ? (
+              <button className="btn btn--ghost" type="button" onClick={cancelSearch}>
+                Cancel
+              </button>
+            ) : (
+              <button className="btn btn--primary" type="submit">
+                Search
+              </button>
+            )}
           </form>
 
           <div className="scan-buttons">
@@ -760,17 +896,37 @@ function App() {
             </div>
           </div>
 
-          {collection.length > 0 && (
-            <div className="collection-toolbar">
+          <div className="collection-toolbar">
+            <button className="btn btn--ghost" onClick={handleDownloadTemplate}>
+              📄 CSV template
+            </button>
+            <button
+              className="btn btn--ghost"
+              onClick={() => importRef.current?.click()}
+              disabled={importBusy}
+            >
+              {importBusy ? 'Importing…' : '⬆ Import CSV'}
+            </button>
+            {collection.length > 0 && (
               <button className="btn btn--ghost" onClick={handleExportCsv}>
                 ⬇ Export CSV
               </button>
-            </div>
-          )}
+            )}
+            <input
+              ref={importRef}
+              type="file"
+              accept=".csv,text/csv"
+              hidden
+              onChange={handleImportCsv}
+            />
+          </div>
+
+          {importMsg && <p className="hint import-msg">{importMsg}</p>}
 
           {collection.length === 0 ? (
             <p className="hint">
-              Your collection is empty. Head to “Search cards” to add some.
+              Your collection is empty. Head to “Search cards” to add some, or import a CSV
+              (download the template for the expected columns).
             </p>
           ) : (
             <ul className="crows">
@@ -786,7 +942,8 @@ function App() {
           )}
           <p className="disclaimer">
             Values are estimates: Near Mint market price adjusted by condition. Actual
-            prices vary by grade, edition, and market.
+            prices vary by grade, edition, and market. CSV import requires a Card ID column
+            — use the template or an exported file.
           </p>
         </section>
       )}

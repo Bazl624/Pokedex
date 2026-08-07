@@ -6,6 +6,18 @@
   gap: 1.25rem;
 }
 
+/* Vertically center the empty home/search screen on phones. */
+.app--home {
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 3.5rem);
+  justify-content: center;
+}
+
+.app--home .home-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
 /* Portrait lock: show a rotate prompt when a phone is held in landscape. */
 .rotate-lock {
   display: none;
@@ -429,6 +441,7 @@
 
 .scanner__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: center;
   margin-top: 0.85rem;
@@ -753,8 +766,15 @@
 
 .collection-toolbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 0.5rem;
   margin-top: 0.85rem;
+}
+
+.import-msg {
+  text-align: left;
+  color: #cdd0ff;
 }
 
 /* Collection rows */

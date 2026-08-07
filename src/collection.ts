@@ -164,3 +164,178 @@ export function formatUsd(value: number | null): string {
     currency: 'USD',
   }).format(value)
 }
+
+/** Headers used by export and the downloadable import template. */
+export const CSV_HEADERS = [
+  'Name',
+  'Set',
+  'Number',
+  'Rarity',
+  'Condition',
+  'Condition Label',
+  'Quantity',
+  'NM Market (USD)',
+  'Est. Unit Value (USD)',
+  'Est. Line Value (USD)',
+  'Card ID',
+] as const
+
+/** Example rows shown in the blank template (illustrative Card IDs). */
+export function collectionTemplateCsv(): string {
+  const examples = [
+    ['Blaine\'s Charizard', 'Gym Challenge', '2', 'Rare Holo', 'NM', 'Near Mint', '1', '', '', '', 'gym2-2'],
+    ['Pikachu', 'Base', '58', 'Common', 'LP', 'Lightly Played', '2', '', '', '', 'base1-58'],
+  ]
+  const lines = [
+    CSV_HEADERS.map(csvField).join(','),
+    ...examples.map((row) => row.map(csvField).join(',')),
+  ]
+  return lines.join('\r\n')
+}
+
+export interface CsvImportRow {
+  cardId: string
+  condition: Condition
+  quantity: number
+  /** Optional name from the CSV, used only for error messages. */
+  name: string
+  lineNumber: number
+}
+
+export interface CsvParseResult {
+  rows: CsvImportRow[]
+  errors: string[]
+}
+
+/** Minimal RFC-4180 CSV line splitter (handles quoted fields). */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        cur += ch
+      }
+    } else if (ch === '"') {
+      inQuotes = true
+    } else if (ch === ',') {
+      out.push(cur)
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  out.push(cur)
+  return out
+}
+
+function parseCondition(raw: string): Condition | null {
+  const t = raw.trim().toUpperCase()
+  if ((CONDITIONS as readonly string[]).includes(t)) return t as Condition
+  // Accept full labels too ("Near Mint", "lightly played", …).
+  const byLabel = (Object.entries(CONDITION_LABELS) as [Condition, string][]).find(
+    ([, label]) => label.toLowerCase() === raw.trim().toLowerCase(),
+  )
+  return byLabel?.[0] ?? null
+}
+
+/**
+ * Parse an inventory CSV (our export format or the downloadable template).
+ * Requires a "Card ID" column and a Condition; Quantity defaults to 1.
+ * Does not hit the network — callers resolve Card IDs via the TCG API.
+ */
+export function parseCollectionCsv(text: string): CsvParseResult {
+  // Strip UTF-8 BOM if present.
+  const cleaned = text.replace(/^\uFEFF/, '')
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0)
+  if (lines.length === 0) {
+    return { rows: [], errors: ['The file is empty.'] }
+  }
+
+  const headers = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase())
+  const idx = (name: string) => headers.indexOf(name.toLowerCase())
+  const idCol = idx('card id')
+  const condCol = idx('condition')
+  const qtyCol = idx('quantity')
+  const nameCol = idx('name')
+
+  if (idCol < 0) {
+    return {
+      rows: [],
+      errors: [
+        'Missing required "Card ID" column. Download the CSV template for the expected format.',
+      ],
+    }
+  }
+  if (condCol < 0) {
+    return {
+      rows: [],
+      errors: [
+        'Missing required "Condition" column (NM, LP, MP, HP, or DMG). Download the CSV template for the expected format.',
+      ],
+    }
+  }
+
+  const rows: CsvImportRow[] = []
+  const errors: string[] = []
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i])
+    const lineNumber = i + 1
+    const cardId = (cols[idCol] ?? '').trim()
+    const name = nameCol >= 0 ? (cols[nameCol] ?? '').trim() : ''
+    const label = name || cardId || `row ${lineNumber}`
+
+    if (!cardId) {
+      errors.push(`Line ${lineNumber}: missing Card ID (${label}).`)
+      continue
+    }
+    const condition = parseCondition(cols[condCol] ?? '')
+    if (!condition) {
+      errors.push(
+        `Line ${lineNumber}: invalid Condition "${cols[condCol] ?? ''}" for ${label}. Use NM, LP, MP, HP, or DMG.`,
+      )
+      continue
+    }
+    const qtyRaw = qtyCol >= 0 ? (cols[qtyCol] ?? '1').trim() : '1'
+    const quantity = Math.max(1, Math.floor(Number(qtyRaw) || 1))
+    rows.push({ cardId, condition, quantity, name, lineNumber })
+  }
+
+  return { rows, errors }
+}
+
+/**
+ * Merge imported lines into an existing collection. Same (cardId + condition)
+ * lines add quantities together.
+ */
+export function mergeImportRows(
+  items: CollectionItem[],
+  imported: { card: Card; condition: Condition; quantity: number }[],
+): CollectionItem[] {
+  let next = items
+  for (const row of imported) {
+    const key = itemKey(row.card.id, row.condition)
+    const existing = next.find((i) => i.key === key)
+    if (existing) {
+      next = next.map((i) =>
+        i.key === key ? { ...i, quantity: i.quantity + row.quantity } : i,
+      )
+    } else {
+      next = [
+        ...next,
+        { key, card: row.card, condition: row.condition, quantity: row.quantity },
+      ]
+    }
+  }
+  return next
+}

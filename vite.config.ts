@@ -12,7 +12,18 @@ export default defineConfig(({ command }) => ({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['pokeball.svg', 'apple-touch-icon.png'],
+      includeAssets: [
+        'pokeball.svg',
+        'apple-touch-icon.png',
+        'collection-template.csv',
+        'tesseract/**',
+      ],
+      workbox: {
+        // OCR wasm cores are ~3MB each; raise the precache ceiling so they
+        // can be cached for offline / reliable phone scanning.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,webmanifest,wasm,gz,csv}'],
+      },
       manifest: {
         name: 'Pokémon TCG Collection',
         short_name: 'TCG Cards',

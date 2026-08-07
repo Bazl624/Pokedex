@@ -69,15 +69,21 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  * with a short backoff makes search reliable. Client errors (4xx other than
  * 429) are returned immediately so the caller can surface them.
  */
-async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
+async function fetchWithRetry(
+  url: string,
+  attempts = 4,
+  signal?: AbortSignal,
+): Promise<Response> {
   let lastError: unknown
   for (let attempt = 0; attempt < attempts; attempt++) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     try {
-      const res = await fetch(url)
+      const res = await fetch(url, { signal })
       if (res.ok) return res
       if (res.status < 500 && res.status !== 429) return res
       lastError = new Error(`HTTP ${res.status}`)
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
       lastError = err
     }
     if (attempt < attempts - 1) await sleep(400 * (attempt + 1))
@@ -89,8 +95,12 @@ async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
 /**
  * Search the Pokémon TCG catalog by card name. Returns cards ordered by most
  * recent set first. Throws an Error with a friendly message on failure.
+ * Pass an AbortSignal to cancel an in-flight search.
  */
-export async function searchCards(query: string): Promise<Card[]> {
+export async function searchCards(
+  query: string,
+  signal?: AbortSignal,
+): Promise<Card[]> {
   const q = query.trim()
   if (!q) {
     throw new Error('Please enter a card name to search.')
@@ -102,7 +112,7 @@ export async function searchCards(query: string): Promise<Card[]> {
     `${API_BASE}/cards?q=${encodeURIComponent(lucene)}` +
     `&pageSize=24&orderBy=-set.releaseDate`
 
-  const res = await fetchWithRetry(url)
+  const res = await fetchWithRetry(url, 4, signal)
 
   if (!res.ok) {
     throw new Error(`Search failed (HTTP ${res.status}). Please try again.`)
@@ -118,4 +128,21 @@ export async function searchCards(query: string): Promise<Card[]> {
     const bHas = b.marketPrice != null ? 0 : 1
     return aHas - bHas
   })
+}
+
+/** Fetch a single card by its API id (e.g. "base1-4"). Returns null if missing. */
+export async function fetchCardById(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Card | null> {
+  const slug = id.trim()
+  if (!slug) return null
+  const url = `${API_BASE}/cards/${encodeURIComponent(slug)}`
+  const res = await fetchWithRetry(url, 3, signal)
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new Error(`Lookup failed (HTTP ${res.status}). Please try again.`)
+  }
+  const body = (await res.json()) as { data?: RawCard }
+  return body.data ? toCard(body.data) : null
 }
