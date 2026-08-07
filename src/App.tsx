@@ -664,7 +664,8 @@ function App() {
   const count = totalCards(collection)
 
   return (
-    <div className="app">
+    <>
+      <div className="app">
       <header className="header">
         <img
           src={`${import.meta.env.BASE_URL}pokeball.svg`}
@@ -823,7 +824,18 @@ function App() {
           <p>Reading card…</p>
         </div>
       )}
-    </div>
+      </div>
+
+      <div className="rotate-lock">
+        <img
+          src={`${import.meta.env.BASE_URL}pokeball.svg`}
+          alt=""
+          className="rotate-lock__logo"
+          aria-hidden="true"
+        />
+        <p>Please rotate your device to portrait to use the app.</p>
+      </div>
+    </>
   )
 }
 
