@@ -6,6 +6,18 @@
   gap: 1.25rem;
 }
 
+/* Vertically center the empty home/search screen on phones. */
+.app--home {
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 3.5rem);
+  justify-content: center;
+}
+
+.app--home .home-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
 /* Portrait lock: show a rotate prompt when a phone is held in landscape. */
 .rotate-lock {
   display: none;
@@ -97,9 +109,75 @@
 }
 
 /* Search */
+.search-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
 .search {
   display: flex;
   gap: 0.5rem;
+}
+
+.set-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.set-filter__label {
+  font-size: 0.85rem;
+  color: #b7b7d0;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.set-filter__select {
+  flex: 1;
+  min-width: 0;
+}
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  background: #23233d;
+  border-radius: 12px;
+}
+
+.bulk-bar__all {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  color: #cdd0ff;
+  margin-right: auto;
+}
+
+.bulk-bar__all input {
+  width: 18px;
+  height: 18px;
+}
+
+.result--selected {
+  outline: 2px solid #6390f0;
+  outline-offset: -2px;
+}
+
+.result__check {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 0.35rem;
+  flex-shrink: 0;
+}
+
+.result__check input {
+  width: 20px;
+  height: 20px;
 }
 
 .search input {
@@ -429,6 +507,7 @@
 
 .scanner__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: center;
   margin-top: 0.85rem;
@@ -643,6 +722,7 @@
 .result,
 .crow {
   display: flex;
+  align-items: flex-start;
   gap: 1rem;
   background: linear-gradient(160deg, #2f2f52 0%, #26263f 100%);
   border-radius: 16px;
@@ -753,7 +833,58 @@
 
 .collection-toolbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.import-msg {
+  text-align: left;
+  color: #cdd0ff;
+}
+
+.persist-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(126, 226, 168, 0.12);
+  border: 1px solid rgba(126, 226, 168, 0.35);
+  color: #b8f0cf;
+}
+
+.persist-banner p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.persist-banner__dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #8a8ab0;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.1rem 0;
+}
+
+.persist-banner__dismiss:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.empty-collection__warn {
+  color: #f3e3a0 !important;
+}
+
+.persist-tip {
+  text-align: left;
+  color: #a8a8d0;
   margin-top: 0.85rem;
 }
 
@@ -789,6 +920,89 @@
 }
 .badge--dmg {
   background: #ee8a8a;
+}
+
+.badge--psa {
+  background: #9bb8ff;
+}
+
+.crow__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.crow__psa {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.15rem;
+}
+
+.crow__psa-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8ab0;
+}
+
+.crow__psa-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 11rem;
+}
+
+.crow__advice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.15rem 0 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+
+.crow__advice strong {
+  font-size: 0.78rem;
+}
+
+.crow__advice--yes {
+  background: rgba(126, 226, 168, 0.12);
+  border-color: rgba(126, 226, 168, 0.35);
+  color: #b8f0cf;
+}
+
+.crow__advice--maybe {
+  background: rgba(247, 208, 44, 0.1);
+  border-color: rgba(247, 208, 44, 0.35);
+  color: #f3e3a0;
+}
+
+.crow__advice--no {
+  background: rgba(238, 138, 138, 0.1);
+  border-color: rgba(238, 138, 138, 0.3);
+  color: #f0c0c0;
+}
+
+.crow__advice--unknown {
+  background: rgba(155, 184, 255, 0.1);
+  border-color: rgba(155, 184, 255, 0.3);
+  color: #c5d4ff;
+}
+
+.crow__values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+}
+
+.crow__unit {
+  font-size: 0.72rem;
+  color: #8a8ab0;
 }
 
 .crow__right {

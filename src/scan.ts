@@ -1,4 +1,4 @@
-import Tesseract from 'tesseract.js'
+import { createWorker, type Worker } from 'tesseract.js'
 
 export interface ScanResult {
   /** Best-guess card name to search for (may be empty if nothing readable). */
@@ -57,21 +57,54 @@ function wordCount(s: string): number {
 }
 
 /**
+ * Absolute base for self-hosted OCR assets under public/tesseract/.
+ * Using same-origin paths (not the jsDelivr CDN) so scanning works reliably
+ * on phones / installed PWAs even when the service worker is active.
+ */
+function tesseractBase(): string {
+  const base = import.meta.env.BASE_URL || '/'
+  const root = base.endsWith('/') ? base : `${base}/`
+  // Absolute URL is required so the Worker blob can importScripts correctly.
+  return new URL(`${root}tesseract/`, window.location.origin).href
+}
+
+let workerPromise: Promise<Worker> | null = null
+
+async function getWorker(): Promise<Worker> {
+  if (!workerPromise) {
+    workerPromise = (async () => {
+      const base = tesseractBase()
+      const worker = await createWorker('eng', 1, {
+        workerPath: `${base}worker.min.js`,
+        corePath: base,
+        langPath: base,
+        // Workers spawned via blob + importScripts need this on some iOS versions.
+        workerBlobURL: true,
+      })
+      return worker
+    })().catch((err) => {
+      // Allow a retry on the next scan if the first setup fails.
+      workerPromise = null
+      throw err
+    })
+  }
+  return workerPromise
+}
+
+/**
  * Run OCR on a captured card image and heuristically extract the card name.
  * Card names sit near the top of the card, so we inspect the first several
- * OCR lines and pick the one with the most name-like content. OCR on phone
- * photos is imperfect, so the UI treats this as a starting search term the
- * user can confirm or edit.
+ * OCR lines and pick the topmost that looks like a name. OCR on phone photos
+ * is imperfect, so the UI treats this as a starting search term the user can
+ * confirm or edit.
  */
 export async function scanCardName(
   image: string | HTMLCanvasElement,
 ): Promise<ScanResult> {
-  const { data } = await Tesseract.recognize(image, 'eng')
+  const worker = await getWorker()
+  const { data } = await worker.recognize(image)
   const rawText = data.text ?? ''
 
-  // Card names are short (1–4 words) and sit near the top. Inspect the first
-  // several OCR lines, clean each, and pick the topmost that looks like a name.
-  // This beats "most letters", which tends to grab long rules/attack text.
   const cleaned = rawText
     .split('\n')
     .map((l) => l.trim())

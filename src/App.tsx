@@ -1,24 +1,35 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
-import { searchCards, type Card } from './tcgapi'
+import { fetchCardById, fetchSets, searchCards, type Card, type CardSet } from './tcgapi'
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
   CONDITIONS,
   CONDITION_LABELS,
   CONDITION_MULTIPLIERS,
+  PSA_GRADES,
   type Condition,
   type CollectionItem,
+  type PsaGrade,
   addToCollection,
+  backupCardCount,
+  collectionTemplateCsv,
   collectionToCsv,
   formatUsd,
+  gradingAdvice,
+  hasCollectionBackup,
   itemValue,
-  loadCollection,
+  loadCollectionDetailed,
+  mergeImportRows,
+  parseCollectionCsv,
   removeItem,
+  restoreCollectionBackup,
   saveCollection,
+  setPsaGrade,
   setQuantity,
   totalCards,
   totalValue,
+  unitValue,
 } from './collection'
 
 type Tab = 'search' | 'collection' | 'guide'
@@ -51,9 +62,13 @@ function ConditionSelect({
 function SearchResult({
   card,
   onAdd,
+  selected,
+  onToggle,
 }: {
   card: Card
   onAdd: (card: Card, condition: Condition) => void
+  selected: boolean
+  onToggle: (id: string) => void
 }) {
   const [condition, setCondition] = useState<Condition>('NM')
   const estimated =
@@ -62,7 +77,15 @@ function SearchResult({
       : card.marketPrice * CONDITION_MULTIPLIERS[condition]
 
   return (
-    <li className="result">
+    <li className={`result${selected ? ' result--selected' : ''}`}>
+      <label className="result__check">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggle(card.id)}
+          aria-label={`Select ${card.name}`}
+        />
+      </label>
       {card.imageSmall ? (
         <img className="result__img" src={card.imageSmall} alt={card.name} loading="lazy" />
       ) : (
@@ -94,12 +117,17 @@ function SearchResult({
 function CollectionRow({
   item,
   onQty,
+  onPsa,
   onRemove,
 }: {
   item: CollectionItem
   onQty: (key: string, qty: number) => void
+  onPsa: (key: string, grade: PsaGrade | null) => void
   onRemove: (key: string) => void
 }) {
+  const advice = gradingAdvice(item)
+  const unit = item.card.marketPrice == null ? null : unitValue(item)
+
   return (
     <li className="crow">
       {item.card.imageSmall ? (
@@ -112,9 +140,42 @@ function CollectionRow({
         <p className="crow__meta">
           {item.card.setName} · #{item.card.number}
         </p>
-        <span className={`badge badge--${item.condition.toLowerCase()}`}>
-          {item.condition} · {CONDITION_LABELS[item.condition]}
-        </span>
+        <div className="crow__badges">
+          <span className={`badge badge--${item.condition.toLowerCase()}`}>
+            {item.condition} · {CONDITION_LABELS[item.condition]}
+          </span>
+          {item.psaGrade != null && (
+            <span className="badge badge--psa">PSA {item.psaGrade}</span>
+          )}
+        </div>
+        <label className="crow__psa">
+          <span className="crow__psa-label">PSA</span>
+          <select
+            className="condition-select crow__psa-select"
+            value={item.psaGrade ?? ''}
+            aria-label={`PSA grade for ${item.card.name}`}
+            onChange={(e) => {
+              const v = e.target.value
+              onPsa(item.key, v === '' ? null : (Number(v) as PsaGrade))
+            }}
+          >
+            <option value="">Raw (ungraded)</option>
+            {PSA_GRADES.map((g) => (
+              <option key={g} value={g}>
+                PSA {g}
+              </option>
+            ))}
+          </select>
+        </label>
+        {advice && (
+          <p
+            className={`crow__advice crow__advice--${advice.verdict}`}
+            title={advice.detail}
+          >
+            <strong>{advice.label}</strong>
+            <span>{advice.detail}</span>
+          </p>
+        )}
       </div>
       <div className="crow__right">
         <div className="qty">
@@ -134,7 +195,12 @@ function CollectionRow({
             +
           </button>
         </div>
-        <span className="crow__value">{formatUsd(itemValue(item))}</span>
+        <div className="crow__values">
+          {unit != null && item.quantity > 1 && (
+            <span className="crow__unit">{formatUsd(unit)} ea</span>
+          )}
+          <span className="crow__value">{formatUsd(itemValue(item))}</span>
+        </div>
         <button
           className="crow__remove"
           aria-label={`Remove ${item.card.name}`}
@@ -150,12 +216,30 @@ function CollectionRow({
 function cameraErrorMessage(err: unknown): string {
   const name = err instanceof DOMException ? err.name : ''
   if (name === 'NotAllowedError' || name === 'SecurityError') {
-    return 'Camera access was blocked. Allow camera permission and try again.'
+    return 'Camera access was blocked. Allow camera permission, or use “Take photo” below.'
   }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-    return 'No camera was found on this device.'
+    return 'Live camera unavailable. Use “Take photo” below — it opens your phone camera.'
   }
-  return 'Could not start the camera on this device.'
+  return 'Live camera unavailable. Use “Take photo” below — it opens your phone camera.'
+}
+
+/**
+ * Start the rear camera when possible. Uses `ideal` (not required) facingMode
+ * so iOS doesn't reject the request, then falls back to any camera.
+ */
+async function startCameraStream(): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new DOMException('getUserMedia unavailable', 'NotSupportedError')
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    })
+  } catch {
+    return await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  }
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -165,6 +249,18 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(file)
   })
+}
+
+function downloadTextFile(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 function CameraScanner({
@@ -178,19 +274,13 @@ function CameraScanner({
   const streamRef = useRef<MediaStream | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setErr('Live camera needs a secure (https) connection. You can still choose a photo below.')
-        return
-      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        })
+        const stream = await startCameraStream()
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
@@ -198,7 +288,10 @@ function CameraScanner({
         streamRef.current = stream
         if (videoRef.current) {
           videoRef.current.srcObject = stream
+          videoRef.current.setAttribute('playsinline', 'true')
+          videoRef.current.muted = true
           await videoRef.current.play()
+          setReady(true)
         }
       } catch (e) {
         setErr(cameraErrorMessage(e))
@@ -231,6 +324,7 @@ function CameraScanner({
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    e.target.value = ''
     stopCamera()
     onCapture(await readFileAsDataUrl(file))
   }
@@ -257,23 +351,33 @@ function CameraScanner({
         ) : (
           <>
             <div className="scanner__viewport">
-              <video ref={videoRef} playsInline muted className="scanner__video" />
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                autoPlay
+                className="scanner__video"
+              />
               <div className="scanner__frame" aria-hidden="true" />
             </div>
             <p className="scanner__hint">
-              Line the card up inside the frame, then capture.
+              Line the card up inside the frame, then capture. Or tap “Take photo”
+              to use your phone’s camera app.
             </p>
           </>
         )}
 
         <div className="scanner__actions">
           {!err && (
-            <button className="btn btn--primary" onClick={capture}>
-              Capture
+            <button className="btn btn--primary" onClick={capture} disabled={!ready}>
+              {ready ? 'Capture' : 'Starting camera…'}
             </button>
           )}
+          <button className="btn btn--primary" onClick={() => fileRef.current?.click()}>
+            📷 Take photo
+          </button>
           <button className="btn btn--ghost" onClick={() => fileRef.current?.click()}>
-            Choose a photo
+            Choose from library
           </button>
         </div>
 
@@ -363,15 +467,8 @@ function ScanSession({
   useEffect(() => {
     let cancelled = false
     async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setCamErr('Live camera needs a secure (https) connection. Use "Choose a photo" to add cards here.')
-        return
-      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        })
+        const stream = await startCameraStream()
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
@@ -379,6 +476,8 @@ function ScanSession({
         streamRef.current = stream
         if (videoRef.current) {
           videoRef.current.srcObject = stream
+          videoRef.current.setAttribute('playsinline', 'true')
+          videoRef.current.muted = true
           await videoRef.current.play()
         }
       } catch (e) {
@@ -484,7 +583,13 @@ function ScanSession({
           {camErr ? (
             <div className="session__camerr">{camErr}</div>
           ) : (
-            <video ref={videoRef} playsInline muted className="scanner__video" />
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="scanner__video"
+            />
           )}
           {!camErr && phase === 'capture' && <div className="scanner__frame" aria-hidden="true" />}
 
@@ -556,8 +661,11 @@ function ScanSession({
                 Capture
               </button>
             )}
+            <button className="btn btn--primary" onClick={() => fileRef.current?.click()}>
+              📷 Take photo
+            </button>
             <button className="btn btn--ghost" onClick={() => fileRef.current?.click()}>
-              Choose a photo
+              Choose from library
             </button>
           </div>
         )}
@@ -586,32 +694,121 @@ function ScanSession({
 function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
+  const [setId, setSetId] = useState('')
+  const [sets, setSets] = useState<CardSet[]>([])
+  const [setsError, setSetsError] = useState<string | null>(null)
   const [results, setResults] = useState<Card[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [collection, setCollection] = useState<CollectionItem[]>(() => loadCollection())
+  const bootRef = useRef<ReturnType<typeof loadCollectionDetailed> | null>(null)
+  if (!bootRef.current) {
+    bootRef.current = loadCollectionDetailed()
+  }
+  const [collection, setCollection] = useState<CollectionItem[]>(
+    () => bootRef.current!.items,
+  )
+  const [persistMsg, setPersistMsg] = useState<string | null>(() => {
+    // Prefer the one-shot restore notice (survives Strict Mode remount).
+    try {
+      const notice = sessionStorage.getItem('pokedex.collection.restoreNotice')
+      if (notice) {
+        sessionStorage.removeItem('pokedex.collection.restoreNotice')
+        return notice
+      }
+    } catch {
+      // ignore
+    }
+    return bootRef.current!.message
+  })
   const [scanning, setScanning] = useState(false)
   const [scanBusy, setScanBusy] = useState(false)
   const [sessionOpen, setSessionOpen] = useState(false)
   const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkCondition, setBulkCondition] = useState<Condition>('NM')
+  const abortRef = useRef<AbortController | null>(null)
+  const importRef = useRef<HTMLInputElement>(null)
+  /** Skip the first effect pass so a failed/empty hydrate cannot wipe storage. */
+  const persistReadyRef = useRef(false)
+  const loadSourceRef = useRef(bootRef.current.source)
 
   useEffect(() => {
-    saveCollection(collection)
+    if (!persistReadyRef.current) {
+      persistReadyRef.current = true
+      // Rewrite migrated shape (e.g. add psaGrade) only when we actually loaded items.
+      if (collection.length > 0) {
+        saveCollection(collection)
+      }
+      return
+    }
+    // Never let an accidental empty state clobber a non-empty primary after a
+    // corrupt/failed hydrate — backup restore UI covers intentional recovery.
+    const allowEmptyOverwrite = loadSourceRef.current !== 'corrupt-empty'
+    saveCollection(collection, { allowEmptyOverwrite })
+    if (collection.length > 0) {
+      loadSourceRef.current = 'primary'
+    }
   }, [collection])
 
-  async function runSearch(term: string) {
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await fetchSets()
+        if (!cancelled) setSets(list)
+      } catch {
+        if (!cancelled) setSetsError('Could not load sets. You can still search by name.')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function runSearch(opts: { name?: string; setId?: string }) {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     setError(null)
     setSearched(true)
+    setSelectedIds(new Set())
     try {
-      setResults(await searchCards(term))
+      setResults(
+        await searchCards({
+          name: opts.name,
+          setId: opts.setId,
+          signal: controller.signal,
+        }),
+      )
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('Search cancelled.')
+        return
+      }
       setResults([])
       setError(err instanceof Error ? err.message : 'Unexpected error')
     } finally {
-      setLoading(false)
+      if (abortRef.current === controller) {
+        setLoading(false)
+        abortRef.current = null
+      }
     }
+  }
+
+  function cancelSearch() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
   }
 
   async function handleScanCapture(dataUrl: string) {
@@ -630,7 +827,7 @@ function App() {
         return
       }
       setQuery(name)
-      await runSearch(name)
+      await runSearch({ name, setId: setId || undefined })
     } catch {
       setError('Could not read the card. Please try again or type the name.')
     } finally {
@@ -640,32 +837,131 @@ function App() {
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault()
-    await runSearch(query)
+    await runSearch({ name: query, setId: setId || undefined })
   }
 
   function handleAdd(card: Card, condition: Condition) {
     setCollection((prev) => addToCollection(prev, card, condition))
   }
 
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === results.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(results.map((c) => c.id)))
+    }
+  }
+
+  function handleAddSelected() {
+    const chosen = results.filter((c) => selectedIds.has(c.id))
+    if (chosen.length === 0) return
+    setCollection((prev) => {
+      let next = prev
+      for (const card of chosen) {
+        next = addToCollection(next, card, bulkCondition)
+      }
+      return next
+    })
+    setSelectedIds(new Set())
+  }
+
   function handleExportCsv() {
     // Prepend a UTF-8 BOM so Excel/Sheets render accented names correctly.
     const csv = '\uFEFF' + collectionToCsv(collection)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `pokemon-tcg-collection-${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    downloadTextFile(
+      `pokemon-tcg-collection-${new Date().toISOString().slice(0, 10)}.csv`,
+      csv,
+      'text/csv;charset=utf-8;',
+    )
+  }
+
+  function handleDownloadTemplate() {
+    downloadTextFile(
+      'pokemon-tcg-collection-template.csv',
+      '\uFEFF' + collectionTemplateCsv(),
+      'text/csv;charset=utf-8;',
+    )
+  }
+
+  async function handleImportCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImportBusy(true)
+    setImportMsg(null)
+    try {
+      const text = await file.text()
+      const parsed = parseCollectionCsv(text)
+      if (parsed.rows.length === 0) {
+        setImportMsg(
+          parsed.errors[0] ??
+            'No valid rows found. Download the CSV template for the expected format.',
+        )
+        return
+      }
+
+      const resolved: {
+        card: Card
+        condition: Condition
+        psaGrade: PsaGrade | null
+        quantity: number
+      }[] = []
+      const lookupErrors: string[] = [...parsed.errors]
+
+      for (const row of parsed.rows) {
+        try {
+          const card = await fetchCardById(row.cardId)
+          if (!card) {
+            lookupErrors.push(
+              `Line ${row.lineNumber}: unknown Card ID "${row.cardId}"${row.name ? ` (${row.name})` : ''}.`,
+            )
+            continue
+          }
+          resolved.push({
+            card,
+            condition: row.condition,
+            psaGrade: row.psaGrade,
+            quantity: row.quantity,
+          })
+        } catch {
+          lookupErrors.push(
+            `Line ${row.lineNumber}: could not look up Card ID "${row.cardId}".`,
+          )
+        }
+      }
+
+      if (resolved.length > 0) {
+        setCollection((prev) => mergeImportRows(prev, resolved))
+      }
+
+      const parts = [`Imported ${resolved.length} of ${parsed.rows.length} row(s).`]
+      if (lookupErrors.length > 0) {
+        parts.push(`${lookupErrors.length} issue(s): ${lookupErrors.slice(0, 3).join(' ')}`)
+        if (lookupErrors.length > 3) parts.push('…')
+      }
+      setImportMsg(parts.join(' '))
+    } catch {
+      setImportMsg('Could not read that CSV file. Download the template and try again.')
+    } finally {
+      setImportBusy(false)
+    }
   }
 
   const count = totalCards(collection)
+  const isHomeEmpty = tab === 'search' && !searched && !loading && !error && results.length === 0
 
   return (
     <>
-      <div className="app">
+      <div className={`app${isHomeEmpty ? ' app--home' : ''}`}>
       <header className="header">
         <img
           src={`${import.meta.env.BASE_URL}pokeball.svg`}
@@ -699,19 +995,45 @@ function App() {
       </nav>
 
       {tab === 'search' && (
-        <section>
-          <form className="search" onSubmit={handleSearch}>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search a card, e.g. Charizard"
-              aria-label="Card name"
-              autoFocus
-            />
-            <button className="btn btn--primary" type="submit" disabled={loading}>
-              {loading ? 'Searching…' : 'Search'}
-            </button>
+        <section className={isHomeEmpty ? 'home-panel' : undefined}>
+          <form className="search-form" onSubmit={handleSearch}>
+            <div className="search">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Card name (optional if set is picked)"
+                aria-label="Card name"
+                autoFocus
+              />
+              {loading ? (
+                <button className="btn btn--ghost" type="button" onClick={cancelSearch}>
+                  Cancel
+                </button>
+              ) : (
+                <button className="btn btn--primary" type="submit">
+                  Search
+                </button>
+              )}
+            </div>
+            <label className="set-filter">
+              <span className="set-filter__label">Set</span>
+              <select
+                className="condition-select set-filter__select"
+                value={setId}
+                onChange={(e) => setSetId(e.target.value)}
+                aria-label="Filter by set"
+              >
+                <option value="">All sets</option>
+                {sets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.series ? ` (${s.series})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {setsError && <p className="hint">{setsError}</p>}
           </form>
 
           <div className="scan-buttons">
@@ -730,16 +1052,50 @@ function App() {
           {error && <p className="error" role="alert">{error}</p>}
 
           {!error && searched && !loading && results.length === 0 && (
-            <p className="hint">No cards found. Try another name.</p>
+            <p className="hint">No cards found. Try another name or set.</p>
           )}
 
           {!searched && !error && (
-            <p className="hint">Search for a card, choose its condition, and add it to your collection.</p>
+            <p className="hint">
+              Search by name, pick a set, or both. Check multiple cards to add them at once.
+            </p>
+          )}
+
+          {results.length > 0 && (
+            <div className="bulk-bar">
+              <label className="bulk-bar__all">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size > 0 && selectedIds.size === results.length}
+                  onChange={toggleSelectAll}
+                />
+                <span>
+                  {selectedIds.size > 0
+                    ? `${selectedIds.size} selected`
+                    : 'Select all'}
+                </span>
+              </label>
+              <ConditionSelect value={bulkCondition} onChange={setBulkCondition} />
+              <button
+                className="btn btn--add"
+                type="button"
+                disabled={selectedIds.size === 0}
+                onClick={handleAddSelected}
+              >
+                + Add selected ({selectedIds.size})
+              </button>
+            </div>
           )}
 
           <ul className="results">
             {results.map((card) => (
-              <SearchResult key={card.id} card={card} onAdd={handleAdd} />
+              <SearchResult
+                key={card.id}
+                card={card}
+                onAdd={handleAdd}
+                selected={selectedIds.has(card.id)}
+                onToggle={toggleSelected}
+              />
             ))}
           </ul>
         </section>
@@ -760,18 +1116,77 @@ function App() {
             </div>
           </div>
 
-          {collection.length > 0 && (
-            <div className="collection-toolbar">
-              <button className="btn btn--ghost" onClick={handleExportCsv}>
-                ⬇ Export CSV
+          {persistMsg && (
+            <div className="persist-banner" role="status">
+              <p>{persistMsg}</p>
+              <button
+                type="button"
+                className="persist-banner__dismiss"
+                onClick={() => setPersistMsg(null)}
+              >
+                Dismiss
               </button>
             </div>
           )}
 
+          <div className="collection-toolbar">
+            <button className="btn btn--ghost" onClick={handleDownloadTemplate}>
+              📄 CSV template
+            </button>
+            <button
+              className="btn btn--ghost"
+              onClick={() => importRef.current?.click()}
+              disabled={importBusy}
+            >
+              {importBusy ? 'Importing…' : '⬆ Import CSV'}
+            </button>
+            {collection.length > 0 && (
+              <button className="btn btn--ghost" onClick={handleExportCsv}>
+                ⬇ Export CSV
+              </button>
+            )}
+            {collection.length === 0 && hasCollectionBackup() && (
+              <button
+                className="btn btn--add"
+                type="button"
+                onClick={() => {
+                  const restored = restoreCollectionBackup()
+                  if (restored) {
+                    loadSourceRef.current = 'backup'
+                    setCollection(restored)
+                    setPersistMsg(
+                      `Restored ${totalCards(restored)} card(s) from the automatic backup.`,
+                    )
+                  }
+                }}
+              >
+                ↺ Restore backup ({backupCardCount()})
+              </button>
+            )}
+            <input
+              ref={importRef}
+              type="file"
+              accept=".csv,text/csv"
+              hidden
+              onChange={handleImportCsv}
+            />
+          </div>
+
+          {importMsg && <p className="hint import-msg">{importMsg}</p>}
+
           {collection.length === 0 ? (
-            <p className="hint">
-              Your collection is empty. Head to “Search cards” to add some.
-            </p>
+            <div className="empty-collection">
+              <p className="hint">
+                Your collection is empty on this device/browser. Add cards from Search, import
+                a CSV, or restore an automatic backup if one is available.
+              </p>
+              <p className="hint empty-collection__warn">
+                Inventory is stored only in this browser (not in the cloud). Prefer{' '}
+                <strong>Export CSV</strong> as your safety copy. On iPhone, open the site in
+                Safari (same bookmark) before re-adding a home-screen icon — deleting the icon
+                can wipe that app’s local data.
+              </p>
+            </div>
           ) : (
             <ul className="crows">
               {collection.map((item) => (
@@ -779,14 +1194,23 @@ function App() {
                   key={item.key}
                   item={item}
                   onQty={(key, qty) => setCollection((prev) => setQuantity(prev, key, qty))}
+                  onPsa={(key, grade) => setCollection((prev) => setPsaGrade(prev, key, grade))}
                   onRemove={(key) => setCollection((prev) => removeItem(prev, key))}
                 />
               ))}
             </ul>
           )}
+          {collection.length > 0 && (
+            <p className="hint persist-tip">
+              Tip: tap <strong>Export CSV</strong> periodically — your inventory lives on this
+              device only, with an automatic on-device backup as a safety net.
+            </p>
+          )}
           <p className="disclaimer">
-            Values are estimates: Near Mint market price adjusted by condition. Actual
-            prices vary by grade, edition, and market.
+            Values are estimates: raw cards use condition multipliers; PSA slabs use rough
+            grade multipliers vs NM market. “Worth grading?” compares an estimated PSA 10
+            minus typical fees (~$40) to your raw value — not financial advice. CSV import
+            needs a Card ID column (and optional PSA Grade) — use the template or an export.
           </p>
         </section>
       )}

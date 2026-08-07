@@ -12,6 +12,13 @@ export interface Card {
   marketPrice: number | null
 }
 
+export interface CardSet {
+  id: string
+  name: string
+  series: string
+  releaseDate: string
+}
+
 interface RawPriceBlock {
   market?: number | null
   mid?: number | null
@@ -69,15 +76,21 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  * with a short backoff makes search reliable. Client errors (4xx other than
  * 429) are returned immediately so the caller can surface them.
  */
-async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
+async function fetchWithRetry(
+  url: string,
+  attempts = 4,
+  signal?: AbortSignal,
+): Promise<Response> {
   let lastError: unknown
   for (let attempt = 0; attempt < attempts; attempt++) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     try {
-      const res = await fetch(url)
+      const res = await fetch(url, { signal })
       if (res.ok) return res
       if (res.status < 500 && res.status !== 429) return res
       lastError = new Error(`HTTP ${res.status}`)
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
       lastError = err
     }
     if (attempt < attempts - 1) await sleep(400 * (attempt + 1))
@@ -86,23 +99,45 @@ async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
   throw new Error('Network error. Please try again.')
 }
 
+export interface SearchOptions {
+  /** Card name (optional if setId is provided). */
+  name?: string
+  /** Set id filter, e.g. "base1" (optional if name is provided). */
+  setId?: string
+  signal?: AbortSignal
+  /** Max results (default 48 when filtering by set, else 24). */
+  pageSize?: number
+}
+
 /**
- * Search the Pokémon TCG catalog by card name. Returns cards ordered by most
- * recent set first. Throws an Error with a friendly message on failure.
+ * Search the Pokémon TCG catalog by card name and/or set. Returns cards with
+ * priced results first. Throws an Error with a friendly message on failure.
+ * Pass an AbortSignal to cancel an in-flight search.
  */
-export async function searchCards(query: string): Promise<Card[]> {
-  const q = query.trim()
-  if (!q) {
-    throw new Error('Please enter a card name to search.')
+export async function searchCards(options: SearchOptions | string): Promise<Card[]> {
+  // Back-compat: older call sites passed (query, signal?).
+  const opts: SearchOptions =
+    typeof options === 'string' ? { name: options } : options
+  const name = (opts.name ?? '').trim()
+  const setId = (opts.setId ?? '').trim()
+  if (!name && !setId) {
+    throw new Error('Enter a card name and/or pick a set to search.')
   }
 
-  // Quoted name query does token "contains" matching and safely handles spaces.
-  const lucene = `name:"${q.replace(/"/g, '')}"`
+  const parts: string[] = []
+  if (name) {
+    // Quoted name query does token "contains" matching and safely handles spaces.
+    parts.push(`name:"${name.replace(/"/g, '')}"`)
+  }
+  if (setId) {
+    parts.push(`set.id:${setId.replace(/[^\w-]/g, '')}`)
+  }
+  const pageSize = opts.pageSize ?? (setId && !name ? 48 : 24)
   const url =
-    `${API_BASE}/cards?q=${encodeURIComponent(lucene)}` +
-    `&pageSize=24&orderBy=-set.releaseDate`
+    `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
+    `&pageSize=${pageSize}&orderBy=number`
 
-  const res = await fetchWithRetry(url)
+  const res = await fetchWithRetry(url, 4, opts.signal)
 
   if (!res.ok) {
     throw new Error(`Search failed (HTTP ${res.status}). Please try again.`)
@@ -112,10 +147,48 @@ export async function searchCards(query: string): Promise<Card[]> {
   const cards = (body.data ?? []).map(toCard)
 
   // Surface cards that actually have a market price first — this app is about
-  // values, so priced results are the most useful to the collector.
+  // values, so priced results are the most useful to the collector. When
+  // browsing a whole set, keep set-number order instead.
+  if (setId && !name) return cards
   return cards.sort((a, b) => {
     const aHas = a.marketPrice != null ? 0 : 1
     const bHas = b.marketPrice != null ? 0 : 1
     return aHas - bHas
   })
+}
+
+/** Load all published sets, newest first. */
+export async function fetchSets(signal?: AbortSignal): Promise<CardSet[]> {
+  const url = `${API_BASE}/sets?pageSize=250&orderBy=-releaseDate`
+  const res = await fetchWithRetry(url, 4, signal)
+  if (!res.ok) {
+    throw new Error(`Could not load sets (HTTP ${res.status}).`)
+  }
+  const body = (await res.json()) as {
+    data?: { id: string; name: string; series?: string; releaseDate?: string }[]
+  }
+  return (body.data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    series: s.series ?? '',
+    releaseDate: s.releaseDate ?? '',
+  }))
+}
+
+/** Fetch a single card by its API id (e.g. "base1-4"). Returns null if missing. */
+export async function fetchCardById(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Card | null> {
+  const slug = id.trim()
+  if (!slug) return null
+  const url = `${API_BASE}/cards/${encodeURIComponent(slug)}`
+  // More retries — single-card GETs occasionally 500 from Cloudflare.
+  const res = await fetchWithRetry(url, 5, signal)
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new Error(`Lookup failed (HTTP ${res.status}). Please try again.`)
+  }
+  const body = (await res.json()) as { data?: RawCard }
+  return body.data ? toCard(body.data) : null
 }

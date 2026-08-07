@@ -52,14 +52,25 @@ than duplicating them here.
   `navigator.mediaDevices.getUserMedia`, which requires a **secure context**
   (https or localhost). It will not work over plain http (e.g. hitting the dev
   server by LAN IP from a phone) — use the deployed https site for on-phone camera.
-  The cloud VM has no physical camera, so getUserMedia fails there; the scanner
-  falls back to a "Choose a photo" file input, which runs the same OCR pipeline
-  and is the way to test scanning in this environment.
-- OCR uses `tesseract.js`, which lazily downloads its worker/wasm core and the
-  `eng` language data at runtime (needs network). Name extraction is a best-effort
-  heuristic (short, top-of-card lines) — it can misread; the UI treats the result
-  as a pre-filled search term the user confirms, so don't expect 100% accuracy.
-  There are OCR unit-testable heuristics in `scan.ts` (`cleanName`) if you tweak them.
+  Use `facingMode: { ideal: 'environment' }` with a plain-video fallback; a hard
+  `facingMode: 'environment'` constraint commonly fails on iOS. The most reliable
+  phone path is the **Take photo** button (`<input capture="environment">`), which
+  opens the native camera app. The cloud VM has no physical camera, so getUserMedia
+  fails there — test OCR via the file-input path.
+- OCR uses `tesseract.js` with **self-hosted** assets under `public/tesseract/`
+  (worker, wasm cores, `eng.traineddata.gz`), configured via `createWorker` paths
+  so scanning does not depend on the jsDelivr CDN (which the PWA service worker
+  can break on phones). Name extraction is best-effort; the UI treats the result
+  as a pre-filled search term.
+- CSV import (`parseCollectionCsv` / `mergeImportRows` in `src/collection.ts`)
+  requires a `Card ID` column. Ship / download the template via
+  `collectionTemplateCsv()` or `public/collection-template.csv`.
+- Collection persistence (`loadCollectionDetailed` / `saveCollection` in
+  `src/collection.ts`) uses `pokedex.collection.v1` plus a last-known-good
+  backup key. Never “fix” empty inventory by clearing storage in code paths
+  that run on boot. Do not tell users to delete and re-add the iOS home-screen
+  icon — that can wipe the PWA’s localStorage; prefer a normal refresh / wait
+  for the service worker update.
 - CSS files are imported as side-effects in `.tsx`; `src/vite-env.d.ts`
   (`/// <reference types="vite/client" />`) provides those module declarations.
   Removing it breaks `tsc`/`pnpm build` even though the dev server still works.
