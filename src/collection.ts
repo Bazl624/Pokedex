@@ -182,8 +182,9 @@ export const CSV_HEADERS = [
 
 /** Example rows shown in the blank template (illustrative Card IDs). */
 export function collectionTemplateCsv(): string {
+  // Use well-known Base Set IDs that resolve reliably from the TCG API.
   const examples = [
-    ['Blaine\'s Charizard', 'Gym Challenge', '2', 'Rare Holo', 'NM', 'Near Mint', '1', '', '', '', 'gym2-2'],
+    ['Charizard', 'Base', '4', 'Rare Holo', 'NM', 'Near Mint', '1', '', '', '', 'base1-4'],
     ['Pikachu', 'Base', '58', 'Common', 'LP', 'Lightly Played', '2', '', '', '', 'base1-58'],
   ]
   const lines = [
