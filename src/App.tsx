@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import { searchCards, type Card } from './tcgapi'
 import { scanCardName } from './scan'
+import { GRADE_GUIDE } from './grading'
 import {
   CONDITIONS,
   CONDITION_LABELS,
@@ -19,7 +20,7 @@ import {
   totalValue,
 } from './collection'
 
-type Tab = 'search' | 'collection'
+type Tab = 'search' | 'collection' | 'guide'
 
 function ConditionSelect({
   value,
@@ -288,6 +289,56 @@ function CameraScanner({
   )
 }
 
+function GradingGuide({ onZoom }: { onZoom: (src: string, alt: string) => void }) {
+  const base = import.meta.env.BASE_URL
+  return (
+    <section className="guide">
+      <p className="guide__intro">
+        Condition drives a card's value. Compare your card to the examples below,
+        then pick the closest grade when adding it. When in doubt, grade down.
+      </p>
+      {GRADE_GUIDE.map((g) => {
+        const src = `${base}grading/${g.image}`
+        const alt = `${CONDITION_LABELS[g.condition]} example card`
+        return (
+          <article className="grade" key={g.condition}>
+            <button
+              className="grade__imgbtn"
+              onClick={() => onZoom(src, alt)}
+              aria-label={`Enlarge ${CONDITION_LABELS[g.condition]} example`}
+            >
+              <img className="grade__img" src={src} alt={alt} loading="lazy" />
+              <span className="grade__zoom" aria-hidden="true">⤢</span>
+            </button>
+            <div className="grade__body">
+              <div className="grade__head">
+                <span className={`badge badge--${g.condition.toLowerCase()}`}>
+                  {g.condition}
+                </span>
+                <h3 className="grade__title">{CONDITION_LABELS[g.condition]}</h3>
+                <span className="grade__mult">
+                  ~{Math.round(CONDITION_MULTIPLIERS[g.condition] * 100)}% of NM
+                </span>
+              </div>
+              <p className="grade__summary">{g.summary}</p>
+              <ul className="grade__list">
+                {g.lookFor.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </article>
+        )
+      })}
+      <p className="disclaimer">
+        Example images are illustrations of typical wear, not photos of specific
+        graded cards. Grading is subjective; professional grades (e.g. PSA/CGC) use
+        stricter numeric scales.
+      </p>
+    </section>
+  )
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
@@ -298,6 +349,7 @@ function App() {
   const [collection, setCollection] = useState<CollectionItem[]>(() => loadCollection())
   const [scanning, setScanning] = useState(false)
   const [scanBusy, setScanBusy] = useState(false)
+  const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
 
   useEffect(() => {
     saveCollection(collection)
@@ -377,6 +429,12 @@ function App() {
           onClick={() => setTab('collection')}
         >
           My collection{count > 0 ? ` (${count})` : ''}
+        </button>
+        <button
+          className={`tab ${tab === 'guide' ? 'tab--active' : ''}`}
+          onClick={() => setTab('guide')}
+        >
+          Grading guide
         </button>
       </nav>
 
@@ -458,6 +516,22 @@ function App() {
             prices vary by grade, edition, and market.
           </p>
         </section>
+      )}
+
+      {tab === 'guide' && <GradingGuide onZoom={(src, alt) => setZoom({ src, alt })} />}
+
+      {zoom && (
+        <div
+          className="lightbox"
+          role="dialog"
+          aria-label={zoom.alt}
+          onClick={() => setZoom(null)}
+        >
+          <img className="lightbox__img" src={zoom.src} alt={zoom.alt} />
+          <button className="lightbox__close" aria-label="Close">
+            ✕
+          </button>
+        </div>
       )}
 
       {scanning && (
