@@ -331,9 +331,9 @@ function GradingGuide({ onZoom }: { onZoom: (src: string, alt: string) => void }
         )
       })}
       <p className="disclaimer">
-        Example images are illustrations of typical wear, not photos of specific
-        graded cards. Grading is subjective; professional grades (e.g. PSA/CGC) use
-        stricter numeric scales.
+        Examples use a real Pokémon card (Base Set Charizard) with simulated wear to
+        illustrate each grade — not photos of specific graded cards. Grading is
+        subjective; professional graders (e.g. PSA/CGC) use stricter numeric scales.
       </p>
     </section>
   )
