@@ -100,19 +100,24 @@ async function fetchWithRetry(
 }
 
 export interface SearchOptions {
-  /** Card name (optional if setId is provided). */
+  /** Card name (optional if setId or number is provided). */
   name?: string
-  /** Set id filter, e.g. "base1" (optional if name is provided). */
+  /** Set id filter, e.g. "base1" (optional if name or number is provided). */
   setId?: string
+  /**
+   * Collector number within a set, e.g. "4", "25", "TG01".
+   * Pair with setId when possible — the same number exists in many sets.
+   */
+  number?: string
   signal?: AbortSignal
   /** Max results (default 48 when filtering by set, else 24). */
   pageSize?: number
 }
 
 /**
- * Search the Pokémon TCG catalog by card name and/or set. Returns cards with
- * priced results first. Throws an Error with a friendly message on failure.
- * Pass an AbortSignal to cancel an in-flight search.
+ * Search the Pokémon TCG catalog by card name, set, and/or collector number.
+ * Returns cards with priced results first. Throws an Error with a friendly
+ * message on failure. Pass an AbortSignal to cancel an in-flight search.
  */
 export async function searchCards(options: SearchOptions | string): Promise<Card[]> {
   // Back-compat: older call sites passed (query, signal?).
@@ -120,8 +125,10 @@ export async function searchCards(options: SearchOptions | string): Promise<Card
     typeof options === 'string' ? { name: options } : options
   const name = (opts.name ?? '').trim()
   const setId = (opts.setId ?? '').trim()
-  if (!name && !setId) {
-    throw new Error('Enter a card name and/or pick a set to search.')
+  // Strip leading # collectors often type ("#4" → "4").
+  const number = (opts.number ?? '').trim().replace(/^#/, '').replace(/"/g, '')
+  if (!name && !setId && !number) {
+    throw new Error('Enter a card name, number, and/or pick a set to search.')
   }
 
   const parts: string[] = []
@@ -132,7 +139,12 @@ export async function searchCards(options: SearchOptions | string): Promise<Card
   if (setId) {
     parts.push(`set.id:${setId.replace(/[^\w-]/g, '')}`)
   }
-  const pageSize = opts.pageSize ?? (setId && !name ? 48 : 24)
+  if (number) {
+    // Quoted number handles alphanumeric / slash forms (e.g. TG01, 4/102).
+    parts.push(`number:"${number}"`)
+  }
+  const browsingSet = Boolean(setId && !name && !number)
+  const pageSize = opts.pageSize ?? (browsingSet || number ? 48 : 24)
   const url =
     `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
     `&pageSize=${pageSize}&orderBy=number`
@@ -148,8 +160,8 @@ export async function searchCards(options: SearchOptions | string): Promise<Card
 
   // Surface cards that actually have a market price first — this app is about
   // values, so priced results are the most useful to the collector. When
-  // browsing a whole set, keep set-number order instead.
-  if (setId && !name) return cards
+  // browsing a whole set (or searching mainly by number), keep number order.
+  if (browsingSet || (number && !name)) return cards
   return cards.sort((a, b) => {
     const aHas = a.marketPrice != null ? 0 : 1
     const bHas = b.marketPrice != null ? 0 : 1

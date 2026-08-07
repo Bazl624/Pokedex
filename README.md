@@ -8,7 +8,8 @@ basic use.
 
 ## Features
 
-- Search the Pokémon TCG catalog by card name (real images, sets, rarity).
+- Search the Pokémon TCG catalog by card name, **card #**, and/or set
+  (real images, sets, rarity).
 - **Scan a card with your camera**: point your phone at a card, and the app reads
   the card name (on-device OCR) and searches for it automatically. On phones you
   can also use **Take photo** (opens the native camera). Camera needs an
@@ -16,9 +17,9 @@ basic use.
 - See each card's market price (USD). Cancel an in-flight search with **Cancel**.
 - Add cards to your collection with a condition grade (NM / LP / MP / HP / DMG)
   and quantity.
-- Mark **PSA grades** (1–10) on collection lines; estimated value switches to
-  PSA multipliers. Raw cards get a **worth grading?** tip (PSA 10 estimate vs
-  typical fees).
+- **Edit** collection lines anytime: condition, PSA grade (1–10), and quantity
+  (type a number or use +/−). Estimated value updates for condition / PSA.
+  Raw cards get a **worth grading?** tip (PSA 10 estimate vs typical fees).
 - Automatic estimated value per card and a running total for the whole collection,
   adjusted for condition / PSA.
 - **Export / Import CSV**: download your inventory, or import one. Use

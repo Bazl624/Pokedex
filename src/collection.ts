@@ -464,6 +464,34 @@ export function removeItem(items: CollectionItem[], key: string): CollectionItem
 }
 
 /**
+ * Change condition on a line. Re-keys the item and merges into an existing
+ * matching (card + condition + PSA) line when needed.
+ */
+export function setCondition(
+  items: CollectionItem[],
+  key: string,
+  condition: Condition,
+): CollectionItem[] {
+  const current = items.find((i) => i.key === key)
+  if (!current || current.condition === condition) return items
+
+  const without = items.filter((i) => i.key !== key)
+  const newKey = itemKey(current.card.id, condition, current.psaGrade)
+  const existing = without.find((i) => i.key === newKey)
+  if (existing) {
+    return without.map((i) =>
+      i.key === newKey
+        ? { ...i, quantity: i.quantity + current.quantity }
+        : i,
+    )
+  }
+  return [
+    ...without,
+    { ...current, key: newKey, condition },
+  ]
+}
+
+/**
  * Set or clear the PSA grade on a line. Re-keys the item and merges into an
  * existing matching slab/raw line when needed.
  */

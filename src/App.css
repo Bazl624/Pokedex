@@ -120,10 +120,18 @@
   gap: 0.5rem;
 }
 
+.search-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .set-filter {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .set-filter__label {
@@ -133,9 +141,28 @@
   flex-shrink: 0;
 }
 
-.set-filter__select {
+.set-filter__select,
+.set-filter__input {
   flex: 1;
   min-width: 0;
+}
+
+.set-filter__input {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: #2a2a4a;
+  color: #fff;
+  outline: none;
+}
+
+.set-filter__input:focus {
+  border-color: #6390f0;
+}
+
+.set-filter__input::placeholder {
+  color: #6f6f96;
 }
 
 .bulk-bar {
@@ -932,14 +959,23 @@
   gap: 0.35rem;
 }
 
-.crow__psa {
+.crow__edit {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  flex-direction: column;
+  gap: 0.4rem;
   margin-top: 0.15rem;
 }
 
-.crow__psa-label {
+.crow__field {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.crow__field-label {
+  width: 4.5rem;
+  flex-shrink: 0;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -947,10 +983,13 @@
   color: #8a8ab0;
 }
 
-.crow__psa-select {
+.crow__field .condition-select {
   flex: 1;
   min-width: 0;
-  max-width: 11rem;
+}
+
+.crow__field--qty .qty {
+  flex: 1;
 }
 
 .crow__advice {
@@ -1040,6 +1079,35 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+
+.qty__input {
+  width: 3.25rem;
+  padding: 0.25rem 0.35rem;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: #1c1c30;
+  color: #fff;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.qty__input:focus {
+  border-color: #6390f0;
+}
+
+/* Hide native number spinners — we already have +/−. */
+.qty__input::-webkit-outer-spin-button,
+.qty__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.qty__input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .crow__value {
