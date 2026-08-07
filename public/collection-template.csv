@@ -1,3 +1,3 @@
-Name,Set,Number,Rarity,Condition,Condition Label,Quantity,NM Market (USD),Est. Unit Value (USD),Est. Line Value (USD),Card ID
-Charizard,Base,4,Rare Holo,NM,Near Mint,1,,,,base1-4
-Pikachu,Base,58,Common,LP,Lightly Played,2,,,,base1-58
+Name,Set,Number,Rarity,Condition,Condition Label,PSA Grade,Quantity,NM Market (USD),Est. Unit Value (USD),Est. Line Value (USD),Card ID
+Charizard,Base,4,Rare Holo,NM,Near Mint,10,1,,,,base1-4
+Pikachu,Base,58,Common,LP,Lightly Played,,2,,,,base1-58

@@ -7,21 +7,26 @@ import {
   CONDITIONS,
   CONDITION_LABELS,
   CONDITION_MULTIPLIERS,
+  PSA_GRADES,
   type Condition,
   type CollectionItem,
+  type PsaGrade,
   addToCollection,
   collectionTemplateCsv,
   collectionToCsv,
   formatUsd,
+  gradingAdvice,
   itemValue,
   loadCollection,
   mergeImportRows,
   parseCollectionCsv,
   removeItem,
   saveCollection,
+  setPsaGrade,
   setQuantity,
   totalCards,
   totalValue,
+  unitValue,
 } from './collection'
 
 type Tab = 'search' | 'collection' | 'guide'
@@ -109,12 +114,17 @@ function SearchResult({
 function CollectionRow({
   item,
   onQty,
+  onPsa,
   onRemove,
 }: {
   item: CollectionItem
   onQty: (key: string, qty: number) => void
+  onPsa: (key: string, grade: PsaGrade | null) => void
   onRemove: (key: string) => void
 }) {
+  const advice = gradingAdvice(item)
+  const unit = item.card.marketPrice == null ? null : unitValue(item)
+
   return (
     <li className="crow">
       {item.card.imageSmall ? (
@@ -127,9 +137,42 @@ function CollectionRow({
         <p className="crow__meta">
           {item.card.setName} · #{item.card.number}
         </p>
-        <span className={`badge badge--${item.condition.toLowerCase()}`}>
-          {item.condition} · {CONDITION_LABELS[item.condition]}
-        </span>
+        <div className="crow__badges">
+          <span className={`badge badge--${item.condition.toLowerCase()}`}>
+            {item.condition} · {CONDITION_LABELS[item.condition]}
+          </span>
+          {item.psaGrade != null && (
+            <span className="badge badge--psa">PSA {item.psaGrade}</span>
+          )}
+        </div>
+        <label className="crow__psa">
+          <span className="crow__psa-label">PSA</span>
+          <select
+            className="condition-select crow__psa-select"
+            value={item.psaGrade ?? ''}
+            aria-label={`PSA grade for ${item.card.name}`}
+            onChange={(e) => {
+              const v = e.target.value
+              onPsa(item.key, v === '' ? null : (Number(v) as PsaGrade))
+            }}
+          >
+            <option value="">Raw (ungraded)</option>
+            {PSA_GRADES.map((g) => (
+              <option key={g} value={g}>
+                PSA {g}
+              </option>
+            ))}
+          </select>
+        </label>
+        {advice && (
+          <p
+            className={`crow__advice crow__advice--${advice.verdict}`}
+            title={advice.detail}
+          >
+            <strong>{advice.label}</strong>
+            <span>{advice.detail}</span>
+          </p>
+        )}
       </div>
       <div className="crow__right">
         <div className="qty">
@@ -149,7 +192,12 @@ function CollectionRow({
             +
           </button>
         </div>
-        <span className="crow__value">{formatUsd(itemValue(item))}</span>
+        <div className="crow__values">
+          {unit != null && item.quantity > 1 && (
+            <span className="crow__unit">{formatUsd(unit)} ea</span>
+          )}
+          <span className="crow__value">{formatUsd(itemValue(item))}</span>
+        </div>
         <button
           className="crow__remove"
           aria-label={`Remove ${item.card.name}`}
@@ -822,7 +870,12 @@ function App() {
         return
       }
 
-      const resolved: { card: Card; condition: Condition; quantity: number }[] = []
+      const resolved: {
+        card: Card
+        condition: Condition
+        psaGrade: PsaGrade | null
+        quantity: number
+      }[] = []
       const lookupErrors: string[] = [...parsed.errors]
 
       for (const row of parsed.rows) {
@@ -834,7 +887,12 @@ function App() {
             )
             continue
           }
-          resolved.push({ card, condition: row.condition, quantity: row.quantity })
+          resolved.push({
+            card,
+            condition: row.condition,
+            psaGrade: row.psaGrade,
+            quantity: row.quantity,
+          })
         } catch {
           lookupErrors.push(
             `Line ${row.lineNumber}: could not look up Card ID "${row.cardId}".`,
@@ -1058,15 +1116,17 @@ function App() {
                   key={item.key}
                   item={item}
                   onQty={(key, qty) => setCollection((prev) => setQuantity(prev, key, qty))}
+                  onPsa={(key, grade) => setCollection((prev) => setPsaGrade(prev, key, grade))}
                   onRemove={(key) => setCollection((prev) => removeItem(prev, key))}
                 />
               ))}
             </ul>
           )}
           <p className="disclaimer">
-            Values are estimates: Near Mint market price adjusted by condition. Actual
-            prices vary by grade, edition, and market. CSV import requires a Card ID column
-            — use the template or an exported file.
+            Values are estimates: raw cards use condition multipliers; PSA slabs use rough
+            grade multipliers vs NM market. “Worth grading?” compares an estimated PSA 10
+            minus typical fees (~$40) to your raw value — not financial advice. CSV import
+            needs a Card ID column (and optional PSA Grade) — use the template or an export.
           </p>
         </section>
       )}

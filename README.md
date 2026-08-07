@@ -16,11 +16,15 @@ basic use.
 - See each card's market price (USD). Cancel an in-flight search with **Cancel**.
 - Add cards to your collection with a condition grade (NM / LP / MP / HP / DMG)
   and quantity.
+- Mark **PSA grades** (1–10) on collection lines; estimated value switches to
+  PSA multipliers. Raw cards get a **worth grading?** tip (PSA 10 estimate vs
+  typical fees).
 - Automatic estimated value per card and a running total for the whole collection,
-  adjusted for condition.
+  adjusted for condition / PSA.
 - **Export / Import CSV**: download your inventory, or import one. Use
   **CSV template** on the My collection tab for the expected columns
-  (`Card ID` + `Condition` required; see `public/collection-template.csv`).
+  (`Card ID` + `Condition` required; optional `PSA Grade`; see
+  `public/collection-template.csv`).
 - Your collection is saved locally in the browser (localStorage), so it persists
   between visits on the same device.
 
