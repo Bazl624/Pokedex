@@ -138,7 +138,8 @@ export async function fetchCardById(
   const slug = id.trim()
   if (!slug) return null
   const url = `${API_BASE}/cards/${encodeURIComponent(slug)}`
-  const res = await fetchWithRetry(url, 3, signal)
+  // More retries — single-card GETs occasionally 500 from Cloudflare.
+  const res = await fetchWithRetry(url, 5, signal)
   if (res.status === 404) return null
   if (!res.ok) {
     throw new Error(`Lookup failed (HTTP ${res.status}). Please try again.`)
