@@ -340,6 +340,249 @@ function GradingGuide({ onZoom }: { onZoom: (src: string, alt: string) => void }
   )
 }
 
+function ScanSession({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (card: Card, condition: Condition) => void
+  onClose: () => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [camErr, setCamErr] = useState<string | null>(null)
+  const [condition, setCondition] = useState<Condition>('NM')
+  const [phase, setPhase] = useState<'capture' | 'reading' | 'result'>('capture')
+  const [matches, setMatches] = useState<Card[]>([])
+  const [selected, setSelected] = useState<Card | null>(null)
+  const [resultMsg, setResultMsg] = useState<string | null>(null)
+  const [addedCount, setAddedCount] = useState(0)
+  const [addedNames, setAddedNames] = useState<string[]>([])
+  const [toast, setToast] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCamErr('Live camera needs a secure (https) connection. Use "Choose a photo" to add cards here.')
+        return
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        })
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        streamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+      } catch (e) {
+        setCamErr(cameraErrorMessage(e))
+      }
+    }
+    start()
+    return () => {
+      cancelled = true
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+  }
+
+  async function process(dataUrl: string) {
+    setPhase('reading')
+    setResultMsg(null)
+    try {
+      const { name } = await scanCardName(dataUrl)
+      if (!name) {
+        setMatches([])
+        setSelected(null)
+        setResultMsg('Could not read the card name. Try again with better lighting.')
+        setPhase('result')
+        return
+      }
+      const found = await searchCards(name)
+      if (found.length === 0) {
+        setMatches([])
+        setSelected(null)
+        setResultMsg(`No matches found for "${name}".`)
+        setPhase('result')
+        return
+      }
+      setMatches(found.slice(0, 6))
+      setSelected(found[0])
+      setPhase('result')
+    } catch {
+      setMatches([])
+      setSelected(null)
+      setResultMsg('Something went wrong reading that card. Please try again.')
+      setPhase('result')
+    }
+  }
+
+  function capture() {
+    const video = videoRef.current
+    if (!video || !video.videoWidth) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    process(canvas.toDataURL('image/jpeg', 0.9))
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = '' // allow selecting the same file again next round
+    process(await readFileAsDataUrl(file))
+  }
+
+  function addSelected() {
+    if (selected) {
+      onAdd(selected, condition)
+      setAddedCount((c) => c + 1)
+      setAddedNames((n) => [selected.name, ...n].slice(0, 6))
+      setToast(`Added ${selected.name} (${condition})`)
+      window.setTimeout(() => setToast(null), 1600)
+    }
+    setPhase('capture')
+  }
+
+  function finish() {
+    stopCamera()
+    onClose()
+  }
+
+  return (
+    <div className="scanner" role="dialog" aria-label="Scan session">
+      <div className="scanner__box">
+        <div className="scanner__header">
+          <h2>Scan session</h2>
+          <button className="scanner__close" aria-label="Finish scanning" onClick={finish}>
+            Done
+          </button>
+        </div>
+
+        <div className="session__bar">
+          <label className="session__cond">
+            Add as{' '}
+            <ConditionSelect value={condition} onChange={setCondition} />
+          </label>
+          <span className="session__count">Added: {addedCount}</span>
+        </div>
+
+        <div className="scanner__viewport">
+          {camErr ? (
+            <div className="session__camerr">{camErr}</div>
+          ) : (
+            <video ref={videoRef} playsInline muted className="scanner__video" />
+          )}
+          {!camErr && phase === 'capture' && <div className="scanner__frame" aria-hidden="true" />}
+
+          {phase === 'reading' && (
+            <div className="session__overlay">
+              <div className="scan-busy__spinner" aria-hidden="true" />
+              <p>Reading card…</p>
+            </div>
+          )}
+
+          {phase === 'result' && (
+            <div className="session__overlay session__overlay--result">
+              {selected ? (
+                <>
+                  <div className="session__match">
+                    {selected.imageSmall && (
+                      <img src={selected.imageSmall} alt={selected.name} />
+                    )}
+                    <div>
+                      <strong>{selected.name}</strong>
+                      <span>{selected.setName} · #{selected.number}</span>
+                      <span>NM market: {formatUsd(selected.marketPrice)}</span>
+                    </div>
+                  </div>
+                  {matches.length > 1 && (
+                    <div className="session__alts">
+                      <span className="session__alts-label">Not right? Pick one:</span>
+                      <div className="session__alts-row">
+                        {matches.map((m) => (
+                          <button
+                            key={m.id}
+                            className={`session__alt ${selected.id === m.id ? 'session__alt--on' : ''}`}
+                            onClick={() => setSelected(m)}
+                            title={`${m.name} · ${m.setName}`}
+                          >
+                            {m.imageSmall && <img src={m.imageSmall} alt={m.name} />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="session__resultbtns">
+                    <button className="btn btn--add" onClick={addSelected}>
+                      + Add ({condition})
+                    </button>
+                    <button className="btn btn--ghost" onClick={() => setPhase('capture')}>
+                      Skip
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="session__err">{resultMsg}</p>
+                  <button className="btn btn--primary" onClick={() => setPhase('capture')}>
+                    Try again
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {toast && <div className="session__toast">{toast} ✓</div>}
+        </div>
+
+        {phase === 'capture' && (
+          <div className="scanner__actions">
+            {!camErr && (
+              <button className="btn btn--primary" onClick={capture}>
+                Capture
+              </button>
+            )}
+            <button className="btn btn--ghost" onClick={() => fileRef.current?.click()}>
+              Choose a photo
+            </button>
+          </div>
+        )}
+
+        {addedNames.length > 0 && (
+          <ul className="session__added">
+            {addedNames.map((n, i) => (
+              <li key={`${n}-${i}`}>{n}</li>
+            ))}
+          </ul>
+        )}
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={onFile}
+        />
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
@@ -350,6 +593,7 @@ function App() {
   const [collection, setCollection] = useState<CollectionItem[]>(() => loadCollection())
   const [scanning, setScanning] = useState(false)
   const [scanBusy, setScanBusy] = useState(false)
+  const [sessionOpen, setSessionOpen] = useState(false)
   const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
 
   useEffect(() => {
@@ -469,13 +713,18 @@ function App() {
             </button>
           </form>
 
-          <button
-            className="btn btn--scan"
-            onClick={() => setScanning(true)}
-            disabled={scanBusy}
-          >
-            {scanBusy ? 'Reading card…' : '📷 Scan a card with your camera'}
-          </button>
+          <div className="scan-buttons">
+            <button
+              className="btn btn--scan"
+              onClick={() => setScanning(true)}
+              disabled={scanBusy}
+            >
+              {scanBusy ? 'Reading card…' : '📷 Scan a card'}
+            </button>
+            <button className="btn btn--scan" onClick={() => setSessionOpen(true)}>
+              🔁 Scan session (add many)
+            </button>
+          </div>
 
           {error && <p className="error" role="alert">{error}</p>}
 
@@ -559,6 +808,13 @@ function App() {
 
       {scanning && (
         <CameraScanner onCapture={handleScanCapture} onClose={() => setScanning(false)} />
+      )}
+
+      {sessionOpen && (
+        <ScanSession
+          onAdd={(card, condition) => handleAdd(card, condition)}
+          onClose={() => setSessionOpen(false)}
+        />
       )}
 
       {scanBusy && (
