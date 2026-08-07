@@ -39,7 +39,12 @@ than duplicating them here.
   network error, check egress rather than the app code.
 - Use the quoted Lucene query form `name:"<query>"` against the TCG API. The bare
   wildcard form (`name:charizard*`) intermittently returns HTTP 500 from the
-  upstream API; the quoted form is reliable and does token "contains" matching.
+  upstream API; the quoted form does token "contains" matching.
+- The TCG API (behind Cloudflare) is genuinely flaky — it randomly returns HTTP
+  500 for perfectly valid requests (~1/3 of calls during testing), independent of
+  query params. `searchCards` retries transient 500s/429s/network errors a few
+  times with backoff (`fetchWithRetry`). Do not "fix" an occasional 500 by
+  rewriting the query — it's upstream instability, and the retry handles it.
 - Without an API key the TCG API has a lower daily rate limit. If searches start
   failing with 429/`API key` errors under heavy use, add a key (see pokemontcg.io)
   rather than assuming an app bug.

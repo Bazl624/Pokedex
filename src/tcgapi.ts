@@ -61,6 +61,31 @@ function toCard(raw: RawCard): Card {
   }
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Fetch with retries. The public TCG API (behind Cloudflare) intermittently
+ * returns transient HTTP 500s / dropped connections; retrying a couple of times
+ * with a short backoff makes search reliable. Client errors (4xx other than
+ * 429) are returned immediately so the caller can surface them.
+ */
+async function fetchWithRetry(url: string, attempts = 4): Promise<Response> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetch(url)
+      if (res.ok) return res
+      if (res.status < 500 && res.status !== 429) return res
+      lastError = new Error(`HTTP ${res.status}`)
+    } catch (err) {
+      lastError = err
+    }
+    if (attempt < attempts - 1) await sleep(400 * (attempt + 1))
+  }
+  void lastError
+  throw new Error('Network error. Please try again.')
+}
+
 /**
  * Search the Pokémon TCG catalog by card name. Returns cards ordered by most
  * recent set first. Throws an Error with a friendly message on failure.
@@ -77,12 +102,7 @@ export async function searchCards(query: string): Promise<Card[]> {
     `${API_BASE}/cards?q=${encodeURIComponent(lucene)}` +
     `&pageSize=24&orderBy=-set.releaseDate`
 
-  let res: Response
-  try {
-    res = await fetch(url)
-  } catch {
-    throw new Error('Network error. Check your connection and try again.')
-  }
+  const res = await fetchWithRetry(url)
 
   if (!res.ok) {
     throw new Error(`Search failed (HTTP ${res.status}). Please try again.`)
