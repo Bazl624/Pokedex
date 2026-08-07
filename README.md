@@ -9,6 +9,10 @@ basic use.
 ## Features
 
 - Search the Pokémon TCG catalog by card name (real images, sets, rarity).
+- **Scan a card with your camera**: point your phone at a card, and the app reads
+  the card name (on-device OCR) and searches for it automatically. If the camera
+  isn't available, you can pick a photo instead. (Camera needs an https/secure
+  connection — it works on the deployed site and on localhost.)
 - See each card's market price (USD).
 - Add cards to your collection with a condition grade (NM / LP / MP / HP / DMG)
   and quantity.

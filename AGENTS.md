@@ -48,6 +48,18 @@ than duplicating them here.
 - Without an API key the TCG API has a lower daily rate limit. If searches start
   failing with 429/`API key` errors under heavy use, add a key (see pokemontcg.io)
   rather than assuming an app bug.
+- Camera scanning (`src/scan.ts` + the `CameraScanner` in `src/App.tsx`) uses
+  `navigator.mediaDevices.getUserMedia`, which requires a **secure context**
+  (https or localhost). It will not work over plain http (e.g. hitting the dev
+  server by LAN IP from a phone) — use the deployed https site for on-phone camera.
+  The cloud VM has no physical camera, so getUserMedia fails there; the scanner
+  falls back to a "Choose a photo" file input, which runs the same OCR pipeline
+  and is the way to test scanning in this environment.
+- OCR uses `tesseract.js`, which lazily downloads its worker/wasm core and the
+  `eng` language data at runtime (needs network). Name extraction is a best-effort
+  heuristic (short, top-of-card lines) — it can misread; the UI treats the result
+  as a pre-filled search term the user confirms, so don't expect 100% accuracy.
+  There are OCR unit-testable heuristics in `scan.ts` (`cleanName`) if you tweak them.
 - CSS files are imported as side-effects in `.tsx`; `src/vite-env.d.ts`
   (`/// <reference types="vite/client" />`) provides those module declarations.
   Removing it breaks `tsc`/`pnpm build` even though the dev server still works.

@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import { searchCards, type Card } from './tcgapi'
+import { scanCardName } from './scan'
 import {
   CONDITIONS,
   CONDITION_LABELS,
@@ -144,6 +145,149 @@ function CollectionRow({
   )
 }
 
+function cameraErrorMessage(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : ''
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Camera access was blocked. Allow camera permission and try again.'
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return 'No camera was found on this device.'
+  }
+  return 'Could not start the camera on this device.'
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function CameraScanner({
+  onCapture,
+  onClose,
+}: {
+  onCapture: (dataUrl: string) => void
+  onClose: () => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setErr('Live camera needs a secure (https) connection. You can still choose a photo below.')
+        return
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        })
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        streamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+      } catch (e) {
+        setErr(cameraErrorMessage(e))
+      }
+    }
+    start()
+    return () => {
+      cancelled = true
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+  }
+
+  function capture() {
+    const video = videoRef.current
+    if (!video || !video.videoWidth) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    stopCamera()
+    onCapture(canvas.toDataURL('image/jpeg', 0.9))
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    stopCamera()
+    onCapture(await readFileAsDataUrl(file))
+  }
+
+  return (
+    <div className="scanner" role="dialog" aria-label="Scan a card">
+      <div className="scanner__box">
+        <div className="scanner__header">
+          <h2>Scan a card</h2>
+          <button
+            className="scanner__close"
+            aria-label="Close scanner"
+            onClick={() => {
+              stopCamera()
+              onClose()
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {err ? (
+          <p className="scanner__error">{err}</p>
+        ) : (
+          <>
+            <div className="scanner__viewport">
+              <video ref={videoRef} playsInline muted className="scanner__video" />
+              <div className="scanner__frame" aria-hidden="true" />
+            </div>
+            <p className="scanner__hint">
+              Line the card up inside the frame, then capture.
+            </p>
+          </>
+        )}
+
+        <div className="scanner__actions">
+          {!err && (
+            <button className="btn btn--primary" onClick={capture}>
+              Capture
+            </button>
+          )}
+          <button className="btn btn--ghost" onClick={() => fileRef.current?.click()}>
+            Choose a photo
+          </button>
+        </div>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={onFile}
+        />
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
@@ -152,24 +296,54 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [collection, setCollection] = useState<CollectionItem[]>(() => loadCollection())
+  const [scanning, setScanning] = useState(false)
+  const [scanBusy, setScanBusy] = useState(false)
 
   useEffect(() => {
     saveCollection(collection)
   }, [collection])
 
-  async function handleSearch(e: FormEvent) {
-    e.preventDefault()
+  async function runSearch(term: string) {
     setLoading(true)
     setError(null)
     setSearched(true)
     try {
-      setResults(await searchCards(query))
+      setResults(await searchCards(term))
     } catch (err) {
       setResults([])
       setError(err instanceof Error ? err.message : 'Unexpected error')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleScanCapture(dataUrl: string) {
+    setScanning(false)
+    setScanBusy(true)
+    setError(null)
+    setTab('search')
+    try {
+      const { name } = await scanCardName(dataUrl)
+      if (!name) {
+        setSearched(true)
+        setResults([])
+        setError(
+          'Could not read a card name from that photo. Try again with good lighting, or type the name.',
+        )
+        return
+      }
+      setQuery(name)
+      await runSearch(name)
+    } catch {
+      setError('Could not read the card. Please try again or type the name.')
+    } finally {
+      setScanBusy(false)
+    }
+  }
+
+  async function handleSearch(e: FormEvent) {
+    e.preventDefault()
+    await runSearch(query)
   }
 
   function handleAdd(card: Card, condition: Condition) {
@@ -221,6 +395,14 @@ function App() {
               {loading ? 'Searching…' : 'Search'}
             </button>
           </form>
+
+          <button
+            className="btn btn--scan"
+            onClick={() => setScanning(true)}
+            disabled={scanBusy}
+          >
+            {scanBusy ? 'Reading card…' : '📷 Scan a card with your camera'}
+          </button>
 
           {error && <p className="error" role="alert">{error}</p>}
 
@@ -276,6 +458,17 @@ function App() {
             prices vary by grade, edition, and market.
           </p>
         </section>
+      )}
+
+      {scanning && (
+        <CameraScanner onCapture={handleScanCapture} onClose={() => setScanning(false)} />
+      )}
+
+      {scanBusy && (
+        <div className="scan-busy" role="status">
+          <div className="scan-busy__spinner" aria-hidden="true" />
+          <p>Reading card…</p>
+        </div>
       )}
     </div>
   )
