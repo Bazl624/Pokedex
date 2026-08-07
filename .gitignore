@@ -26,3 +26,6 @@ dist-ssr
 
 # stray local test server dir
 temp-serve
+
+# Tesseract language data (downloaded at runtime by tests)
+*.traineddata
