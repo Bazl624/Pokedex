@@ -25,8 +25,11 @@ basic use.
   **CSV template** on the My collection tab for the expected columns
   (`Card ID` + `Condition` required; optional `PSA Grade`; see
   `public/collection-template.csv`).
-- Your collection is saved locally in the browser (localStorage), so it persists
-  between visits on the same device.
+- Your collection is saved locally in the browser (`localStorage`), with an
+  automatic on-device backup. It is **not** synced to the cloud — use
+  **Export CSV** as your off-device copy. On iPhone, prefer updating the existing
+  home-screen icon rather than deleting and re-adding it (that can wipe local
+  data).
 
 ## Tech stack
 

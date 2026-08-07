@@ -65,6 +65,12 @@ than duplicating them here.
 - CSV import (`parseCollectionCsv` / `mergeImportRows` in `src/collection.ts`)
   requires a `Card ID` column. Ship / download the template via
   `collectionTemplateCsv()` or `public/collection-template.csv`.
+- Collection persistence (`loadCollectionDetailed` / `saveCollection` in
+  `src/collection.ts`) uses `pokedex.collection.v1` plus a last-known-good
+  backup key. Never “fix” empty inventory by clearing storage in code paths
+  that run on boot. Do not tell users to delete and re-add the iOS home-screen
+  icon — that can wipe the PWA’s localStorage; prefer a normal refresh / wait
+  for the service worker update.
 - CSS files are imported as side-effects in `.tsx`; `src/vite-env.d.ts`
   (`/// <reference types="vite/client" />`) provides those module declarations.
   Removing it breaks `tsc`/`pnpm build` even though the dev server still works.

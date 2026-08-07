@@ -12,15 +12,18 @@ import {
   type CollectionItem,
   type PsaGrade,
   addToCollection,
+  backupCardCount,
   collectionTemplateCsv,
   collectionToCsv,
   formatUsd,
   gradingAdvice,
+  hasCollectionBackup,
   itemValue,
-  loadCollection,
+  loadCollectionDetailed,
   mergeImportRows,
   parseCollectionCsv,
   removeItem,
+  restoreCollectionBackup,
   saveCollection,
   setPsaGrade,
   setQuantity,
@@ -698,7 +701,26 @@ function App() {
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [collection, setCollection] = useState<CollectionItem[]>(() => loadCollection())
+  const bootRef = useRef<ReturnType<typeof loadCollectionDetailed> | null>(null)
+  if (!bootRef.current) {
+    bootRef.current = loadCollectionDetailed()
+  }
+  const [collection, setCollection] = useState<CollectionItem[]>(
+    () => bootRef.current!.items,
+  )
+  const [persistMsg, setPersistMsg] = useState<string | null>(() => {
+    // Prefer the one-shot restore notice (survives Strict Mode remount).
+    try {
+      const notice = sessionStorage.getItem('pokedex.collection.restoreNotice')
+      if (notice) {
+        sessionStorage.removeItem('pokedex.collection.restoreNotice')
+        return notice
+      }
+    } catch {
+      // ignore
+    }
+    return bootRef.current!.message
+  })
   const [scanning, setScanning] = useState(false)
   const [scanBusy, setScanBusy] = useState(false)
   const [sessionOpen, setSessionOpen] = useState(false)
@@ -709,9 +731,26 @@ function App() {
   const [bulkCondition, setBulkCondition] = useState<Condition>('NM')
   const abortRef = useRef<AbortController | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
+  /** Skip the first effect pass so a failed/empty hydrate cannot wipe storage. */
+  const persistReadyRef = useRef(false)
+  const loadSourceRef = useRef(bootRef.current.source)
 
   useEffect(() => {
-    saveCollection(collection)
+    if (!persistReadyRef.current) {
+      persistReadyRef.current = true
+      // Rewrite migrated shape (e.g. add psaGrade) only when we actually loaded items.
+      if (collection.length > 0) {
+        saveCollection(collection)
+      }
+      return
+    }
+    // Never let an accidental empty state clobber a non-empty primary after a
+    // corrupt/failed hydrate — backup restore UI covers intentional recovery.
+    const allowEmptyOverwrite = loadSourceRef.current !== 'corrupt-empty'
+    saveCollection(collection, { allowEmptyOverwrite })
+    if (collection.length > 0) {
+      loadSourceRef.current = 'primary'
+    }
   }, [collection])
 
   useEffect(() => {
@@ -1077,6 +1116,19 @@ function App() {
             </div>
           </div>
 
+          {persistMsg && (
+            <div className="persist-banner" role="status">
+              <p>{persistMsg}</p>
+              <button
+                type="button"
+                className="persist-banner__dismiss"
+                onClick={() => setPersistMsg(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           <div className="collection-toolbar">
             <button className="btn btn--ghost" onClick={handleDownloadTemplate}>
               📄 CSV template
@@ -1093,6 +1145,24 @@ function App() {
                 ⬇ Export CSV
               </button>
             )}
+            {collection.length === 0 && hasCollectionBackup() && (
+              <button
+                className="btn btn--add"
+                type="button"
+                onClick={() => {
+                  const restored = restoreCollectionBackup()
+                  if (restored) {
+                    loadSourceRef.current = 'backup'
+                    setCollection(restored)
+                    setPersistMsg(
+                      `Restored ${totalCards(restored)} card(s) from the automatic backup.`,
+                    )
+                  }
+                }}
+              >
+                ↺ Restore backup ({backupCardCount()})
+              </button>
+            )}
             <input
               ref={importRef}
               type="file"
@@ -1105,10 +1175,18 @@ function App() {
           {importMsg && <p className="hint import-msg">{importMsg}</p>}
 
           {collection.length === 0 ? (
-            <p className="hint">
-              Your collection is empty. Head to “Search cards” to add some, or import a CSV
-              (download the template for the expected columns).
-            </p>
+            <div className="empty-collection">
+              <p className="hint">
+                Your collection is empty on this device/browser. Add cards from Search, import
+                a CSV, or restore an automatic backup if one is available.
+              </p>
+              <p className="hint empty-collection__warn">
+                Inventory is stored only in this browser (not in the cloud). Prefer{' '}
+                <strong>Export CSV</strong> as your safety copy. On iPhone, open the site in
+                Safari (same bookmark) before re-adding a home-screen icon — deleting the icon
+                can wipe that app’s local data.
+              </p>
+            </div>
           ) : (
             <ul className="crows">
               {collection.map((item) => (
@@ -1121,6 +1199,12 @@ function App() {
                 />
               ))}
             </ul>
+          )}
+          {collection.length > 0 && (
+            <p className="hint persist-tip">
+              Tip: tap <strong>Export CSV</strong> periodically — your inventory lives on this
+              device only, with an automatic on-device backup as a safety net.
+            </p>
           )}
           <p className="disclaimer">
             Values are estimates: raw cards use condition multipliers; PSA slabs use rough

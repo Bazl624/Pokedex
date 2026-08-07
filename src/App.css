@@ -844,6 +844,50 @@
   color: #cdd0ff;
 }
 
+.persist-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(126, 226, 168, 0.12);
+  border: 1px solid rgba(126, 226, 168, 0.35);
+  color: #b8f0cf;
+}
+
+.persist-banner p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.persist-banner__dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #8a8ab0;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.1rem 0;
+}
+
+.persist-banner__dismiss:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.empty-collection__warn {
+  color: #f3e3a0 !important;
+}
+
+.persist-tip {
+  text-align: left;
+  color: #a8a8d0;
+  margin-top: 0.85rem;
+}
+
 /* Collection rows */
 .crow__body {
   display: flex;

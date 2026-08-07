@@ -66,7 +66,12 @@ export interface CollectionItem {
   psaGrade: PsaGrade | null
 }
 
+/** Primary inventory blob in localStorage. */
 const STORAGE_KEY = 'pokedex.collection.v1'
+/** Last-known-good non-empty inventory (never cleared when primary becomes empty). */
+const BACKUP_KEY = 'pokedex.collection.backup.v1'
+/** Raw bytes preserved if primary JSON fails to parse. */
+const CORRUPT_KEY = 'pokedex.collection.corrupt.v1'
 
 export function itemKey(
   cardId: string,
@@ -78,6 +83,220 @@ export function itemKey(
 
 function isPsaGrade(n: unknown): n is PsaGrade {
   return typeof n === 'number' && (PSA_GRADES as readonly number[]).includes(n)
+}
+
+function isCondition(c: unknown): c is Condition {
+  return typeof c === 'string' && (CONDITIONS as readonly string[]).includes(c)
+}
+
+function isCardLike(c: unknown): c is Card {
+  if (!c || typeof c !== 'object') return false
+  const card = c as Partial<Card>
+  return typeof card.id === 'string' && card.id.length > 0 && typeof card.name === 'string'
+}
+
+function storageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function storageSet(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Parse a stored JSON array into collection items.
+ * Returns null when the payload is corrupt (not a valid array).
+ * Returns [] when the array is valid but empty / has no usable rows.
+ */
+function parseStoredItems(raw: string): CollectionItem[] | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return null
+    return parsed
+      .filter(
+        (i): i is Partial<CollectionItem> & { card: Card; condition: Condition } =>
+          Boolean(i && typeof i === 'object' && isCardLike((i as CollectionItem).card) && isCondition((i as CollectionItem).condition)),
+      )
+      .map(normalizeItem)
+  } catch {
+    return null
+  }
+}
+
+export type CollectionLoadSource =
+  | 'primary'
+  | 'backup'
+  | 'empty'
+  | 'corrupt-recovered'
+  | 'corrupt-empty'
+
+export interface CollectionLoadResult {
+  items: CollectionItem[]
+  source: CollectionLoadSource
+  /** User-facing notice when we restored or failed to read data. */
+  message: string | null
+}
+
+/**
+ * Load inventory with automatic backup recovery.
+ * Never throws; never deletes storage as a side effect of a failed parse
+ * (corrupt primary is copied aside, then backup is tried).
+ */
+export function loadCollectionDetailed(): CollectionLoadResult {
+  const primaryRaw = storageGet(STORAGE_KEY)
+  const primaryItems = primaryRaw != null ? parseStoredItems(primaryRaw) : null
+
+  if (primaryItems && primaryItems.length > 0) {
+    return { items: primaryItems, source: 'primary', message: null }
+  }
+
+  const backupRaw = storageGet(BACKUP_KEY)
+  const backupItems = backupRaw != null ? parseStoredItems(backupRaw) : null
+
+  if (backupItems && backupItems.length > 0) {
+    // Promote backup back to primary so the next launch is clean.
+    const serialized = JSON.stringify(backupItems)
+    storageSet(STORAGE_KEY, serialized)
+    // Refresh backup to the normalized shape too.
+    storageSet(BACKUP_KEY, serialized)
+
+    const fromCorrupt = primaryRaw != null && primaryItems === null
+    if (fromCorrupt) {
+      storageSet(CORRUPT_KEY, primaryRaw)
+    }
+
+    const message = fromCorrupt
+      ? 'Your collection file looked damaged, so we restored the automatic backup.'
+      : 'Your collection was empty, so we restored the automatic backup.'
+    // Survive React Strict Mode remounts (dev) and show once per restore.
+    try {
+      sessionStorage.setItem('pokedex.collection.restoreNotice', message)
+    } catch {
+      // ignore
+    }
+
+    return {
+      items: backupItems,
+      source: fromCorrupt ? 'corrupt-recovered' : 'backup',
+      message,
+    }
+  }
+
+  if (primaryRaw != null && primaryItems === null) {
+    storageSet(CORRUPT_KEY, primaryRaw)
+    return {
+      items: [],
+      source: 'corrupt-empty',
+      message:
+        'Could not read your saved collection and no backup was available. If you exported a CSV earlier, use Import CSV to restore it.',
+    }
+  }
+
+  return { items: [], source: 'empty', message: null }
+}
+
+/** Convenience wrapper used by simple callers. */
+export function loadCollection(): CollectionItem[] {
+  return loadCollectionDetailed().items
+}
+
+export interface SaveCollectionResult {
+  saved: boolean
+  /** True when we refused to replace a non-empty primary with []. */
+  refusedEmptyOverwrite: boolean
+}
+
+/**
+ * Persist inventory. Keeps a last-known-good backup of any non-empty save.
+ * Writing an empty list does not clear the backup (so you can recover).
+ * Refuses to overwrite a non-empty primary with [] unless allowEmptyOverwrite.
+ */
+export function saveCollection(
+  items: CollectionItem[],
+  options: { allowEmptyOverwrite?: boolean } = {},
+): SaveCollectionResult {
+  const { allowEmptyOverwrite = true } = options
+  const serialized = JSON.stringify(items)
+
+  if (items.length === 0) {
+    const primaryRaw = storageGet(STORAGE_KEY)
+    const primaryItems = primaryRaw != null ? parseStoredItems(primaryRaw) : null
+
+    // Preserve last good snapshot before clearing primary.
+    if (primaryItems && primaryItems.length > 0) {
+      storageSet(BACKUP_KEY, JSON.stringify(primaryItems))
+    }
+
+    if (
+      !allowEmptyOverwrite &&
+      primaryItems &&
+      primaryItems.length > 0
+    ) {
+      return { saved: false, refusedEmptyOverwrite: true }
+    }
+
+    // If primary is corrupt, don't clobber it with [] — keep bytes under CORRUPT_KEY.
+    if (primaryRaw != null && primaryItems === null) {
+      storageSet(CORRUPT_KEY, primaryRaw)
+      return { saved: false, refusedEmptyOverwrite: true }
+    }
+
+    const ok = storageSet(STORAGE_KEY, serialized)
+    return { saved: ok, refusedEmptyOverwrite: false }
+  }
+
+  // Non-empty save: roll previous primary into backup, then write primary + backup.
+  const previous = storageGet(STORAGE_KEY)
+  if (previous) {
+    const prevItems = parseStoredItems(previous)
+    if (prevItems && prevItems.length > 0) {
+      storageSet(BACKUP_KEY, previous)
+    }
+  }
+
+  const okPrimary = storageSet(STORAGE_KEY, serialized)
+  const okBackup = storageSet(BACKUP_KEY, serialized)
+  return { saved: okPrimary && okBackup, refusedEmptyOverwrite: false }
+}
+
+/** True when a non-empty backup exists (for recovery UI). */
+export function hasCollectionBackup(): boolean {
+  const raw = storageGet(BACKUP_KEY)
+  if (!raw) return false
+  const items = parseStoredItems(raw)
+  return Boolean(items && items.length > 0)
+}
+
+/** Card count stored in the backup, or 0. */
+export function backupCardCount(): number {
+  const raw = storageGet(BACKUP_KEY)
+  if (!raw) return 0
+  const items = parseStoredItems(raw)
+  return items ? totalCards(items) : 0
+}
+
+/**
+ * Force-restore inventory from the automatic backup into primary + React state.
+ * Returns null if no usable backup exists.
+ */
+export function restoreCollectionBackup(): CollectionItem[] | null {
+  const raw = storageGet(BACKUP_KEY)
+  if (!raw) return null
+  const items = parseStoredItems(raw)
+  if (!items || items.length === 0) return null
+  const serialized = JSON.stringify(items)
+  storageSet(STORAGE_KEY, serialized)
+  storageSet(BACKUP_KEY, serialized)
+  return items
 }
 
 /** Unit estimated value (one copy) for a line item. */
@@ -191,36 +410,24 @@ function normalizeItem(raw: Partial<CollectionItem> & { card: Card; condition: C
   const psaGrade = isPsaGrade(raw.psaGrade) ? raw.psaGrade : null
   const condition = raw.condition
   const quantity = typeof raw.quantity === 'number' && raw.quantity > 0 ? raw.quantity : 1
+  // Fill any missing card fields so older localStorage blobs still render.
+  const card: Card = {
+    id: raw.card.id,
+    name: raw.card.name,
+    setName: raw.card.setName ?? 'Unknown set',
+    number: raw.card.number ?? '',
+    rarity: raw.card.rarity ?? null,
+    imageSmall: raw.card.imageSmall ?? null,
+    imageLarge: raw.card.imageLarge ?? null,
+    marketPrice:
+      typeof raw.card.marketPrice === 'number' ? raw.card.marketPrice : null,
+  }
   return {
-    key: itemKey(raw.card.id, condition, psaGrade),
-    card: raw.card,
+    key: itemKey(card.id, condition, psaGrade),
+    card,
     condition,
     quantity,
     psaGrade,
-  }
-}
-
-export function loadCollection(): CollectionItem[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as Partial<CollectionItem>[]
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((i): i is Partial<CollectionItem> & { card: Card; condition: Condition } =>
-        Boolean(i && i.card && i.condition),
-      )
-      .map(normalizeItem)
-  } catch {
-    return []
-  }
-}
-
-export function saveCollection(items: CollectionItem[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
-  } catch {
-    // Ignore write failures (e.g. private mode / storage full).
   }
 }
 
