@@ -181,7 +181,12 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <img src="/pokeball.svg" alt="" className="logo" aria-hidden="true" />
+        <img
+          src={`${import.meta.env.BASE_URL}pokeball.svg`}
+          alt=""
+          className="logo"
+          aria-hidden="true"
+        />
         <h1>Card Collection</h1>
         <p className="tagline">Track your Pokémon TCG cards, conditions, and values.</p>
       </header>
