@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
-import { fetchCardById, searchCards, type Card } from './tcgapi'
+import { fetchCardById, fetchSets, searchCards, type Card, type CardSet } from './tcgapi'
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
@@ -54,9 +54,13 @@ function ConditionSelect({
 function SearchResult({
   card,
   onAdd,
+  selected,
+  onToggle,
 }: {
   card: Card
   onAdd: (card: Card, condition: Condition) => void
+  selected: boolean
+  onToggle: (id: string) => void
 }) {
   const [condition, setCondition] = useState<Condition>('NM')
   const estimated =
@@ -65,7 +69,15 @@ function SearchResult({
       : card.marketPrice * CONDITION_MULTIPLIERS[condition]
 
   return (
-    <li className="result">
+    <li className={`result${selected ? ' result--selected' : ''}`}>
+      <label className="result__check">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggle(card.id)}
+          aria-label={`Select ${card.name}`}
+        />
+      </label>
       {card.imageSmall ? (
         <img className="result__img" src={card.imageSmall} alt={card.name} loading="lazy" />
       ) : (
@@ -631,6 +643,9 @@ function ScanSession({
 function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
+  const [setId, setSetId] = useState('')
+  const [sets, setSets] = useState<CardSet[]>([])
+  const [setsError, setSetsError] = useState<string | null>(null)
   const [results, setResults] = useState<Card[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -642,6 +657,8 @@ function App() {
   const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
   const [importBusy, setImportBusy] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkCondition, setBulkCondition] = useState<Condition>('NM')
   const abortRef = useRef<AbortController | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
 
@@ -655,15 +672,37 @@ function App() {
     }
   }, [])
 
-  async function runSearch(term: string) {
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await fetchSets()
+        if (!cancelled) setSets(list)
+      } catch {
+        if (!cancelled) setSetsError('Could not load sets. You can still search by name.')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function runSearch(opts: { name?: string; setId?: string }) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setLoading(true)
     setError(null)
     setSearched(true)
+    setSelectedIds(new Set())
     try {
-      setResults(await searchCards(term, controller.signal))
+      setResults(
+        await searchCards({
+          name: opts.name,
+          setId: opts.setId,
+          signal: controller.signal,
+        }),
+      )
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('Search cancelled.')
@@ -701,7 +740,7 @@ function App() {
         return
       }
       setQuery(name)
-      await runSearch(name)
+      await runSearch({ name, setId: setId || undefined })
     } catch {
       setError('Could not read the card. Please try again or type the name.')
     } finally {
@@ -711,11 +750,41 @@ function App() {
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault()
-    await runSearch(query)
+    await runSearch({ name: query, setId: setId || undefined })
   }
 
   function handleAdd(card: Card, condition: Condition) {
     setCollection((prev) => addToCollection(prev, card, condition))
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === results.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(results.map((c) => c.id)))
+    }
+  }
+
+  function handleAddSelected() {
+    const chosen = results.filter((c) => selectedIds.has(c.id))
+    if (chosen.length === 0) return
+    setCollection((prev) => {
+      let next = prev
+      for (const card of chosen) {
+        next = addToCollection(next, card, bulkCondition)
+      }
+      return next
+    })
+    setSelectedIds(new Set())
   }
 
   function handleExportCsv() {
@@ -830,24 +899,44 @@ function App() {
 
       {tab === 'search' && (
         <section className={isHomeEmpty ? 'home-panel' : undefined}>
-          <form className="search" onSubmit={handleSearch}>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search a card, e.g. Charizard"
-              aria-label="Card name"
-              autoFocus
-            />
-            {loading ? (
-              <button className="btn btn--ghost" type="button" onClick={cancelSearch}>
-                Cancel
-              </button>
-            ) : (
-              <button className="btn btn--primary" type="submit">
-                Search
-              </button>
-            )}
+          <form className="search-form" onSubmit={handleSearch}>
+            <div className="search">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Card name (optional if set is picked)"
+                aria-label="Card name"
+                autoFocus
+              />
+              {loading ? (
+                <button className="btn btn--ghost" type="button" onClick={cancelSearch}>
+                  Cancel
+                </button>
+              ) : (
+                <button className="btn btn--primary" type="submit">
+                  Search
+                </button>
+              )}
+            </div>
+            <label className="set-filter">
+              <span className="set-filter__label">Set</span>
+              <select
+                className="condition-select set-filter__select"
+                value={setId}
+                onChange={(e) => setSetId(e.target.value)}
+                aria-label="Filter by set"
+              >
+                <option value="">All sets</option>
+                {sets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.series ? ` (${s.series})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {setsError && <p className="hint">{setsError}</p>}
           </form>
 
           <div className="scan-buttons">
@@ -866,16 +955,50 @@ function App() {
           {error && <p className="error" role="alert">{error}</p>}
 
           {!error && searched && !loading && results.length === 0 && (
-            <p className="hint">No cards found. Try another name.</p>
+            <p className="hint">No cards found. Try another name or set.</p>
           )}
 
           {!searched && !error && (
-            <p className="hint">Search for a card, choose its condition, and add it to your collection.</p>
+            <p className="hint">
+              Search by name, pick a set, or both. Check multiple cards to add them at once.
+            </p>
+          )}
+
+          {results.length > 0 && (
+            <div className="bulk-bar">
+              <label className="bulk-bar__all">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size > 0 && selectedIds.size === results.length}
+                  onChange={toggleSelectAll}
+                />
+                <span>
+                  {selectedIds.size > 0
+                    ? `${selectedIds.size} selected`
+                    : 'Select all'}
+                </span>
+              </label>
+              <ConditionSelect value={bulkCondition} onChange={setBulkCondition} />
+              <button
+                className="btn btn--add"
+                type="button"
+                disabled={selectedIds.size === 0}
+                onClick={handleAddSelected}
+              >
+                + Add selected ({selectedIds.size})
+              </button>
+            </div>
           )}
 
           <ul className="results">
             {results.map((card) => (
-              <SearchResult key={card.id} card={card} onAdd={handleAdd} />
+              <SearchResult
+                key={card.id}
+                card={card}
+                onAdd={handleAdd}
+                selected={selectedIds.has(card.id)}
+                onToggle={toggleSelected}
+              />
             ))}
           </ul>
         </section>

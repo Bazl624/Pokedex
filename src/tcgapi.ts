@@ -12,6 +12,13 @@ export interface Card {
   marketPrice: number | null
 }
 
+export interface CardSet {
+  id: string
+  name: string
+  series: string
+  releaseDate: string
+}
+
 interface RawPriceBlock {
   market?: number | null
   mid?: number | null
@@ -92,27 +99,45 @@ async function fetchWithRetry(
   throw new Error('Network error. Please try again.')
 }
 
+export interface SearchOptions {
+  /** Card name (optional if setId is provided). */
+  name?: string
+  /** Set id filter, e.g. "base1" (optional if name is provided). */
+  setId?: string
+  signal?: AbortSignal
+  /** Max results (default 48 when filtering by set, else 24). */
+  pageSize?: number
+}
+
 /**
- * Search the Pokémon TCG catalog by card name. Returns cards ordered by most
- * recent set first. Throws an Error with a friendly message on failure.
+ * Search the Pokémon TCG catalog by card name and/or set. Returns cards with
+ * priced results first. Throws an Error with a friendly message on failure.
  * Pass an AbortSignal to cancel an in-flight search.
  */
-export async function searchCards(
-  query: string,
-  signal?: AbortSignal,
-): Promise<Card[]> {
-  const q = query.trim()
-  if (!q) {
-    throw new Error('Please enter a card name to search.')
+export async function searchCards(options: SearchOptions | string): Promise<Card[]> {
+  // Back-compat: older call sites passed (query, signal?).
+  const opts: SearchOptions =
+    typeof options === 'string' ? { name: options } : options
+  const name = (opts.name ?? '').trim()
+  const setId = (opts.setId ?? '').trim()
+  if (!name && !setId) {
+    throw new Error('Enter a card name and/or pick a set to search.')
   }
 
-  // Quoted name query does token "contains" matching and safely handles spaces.
-  const lucene = `name:"${q.replace(/"/g, '')}"`
+  const parts: string[] = []
+  if (name) {
+    // Quoted name query does token "contains" matching and safely handles spaces.
+    parts.push(`name:"${name.replace(/"/g, '')}"`)
+  }
+  if (setId) {
+    parts.push(`set.id:${setId.replace(/[^\w-]/g, '')}`)
+  }
+  const pageSize = opts.pageSize ?? (setId && !name ? 48 : 24)
   const url =
-    `${API_BASE}/cards?q=${encodeURIComponent(lucene)}` +
-    `&pageSize=24&orderBy=-set.releaseDate`
+    `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
+    `&pageSize=${pageSize}&orderBy=number`
 
-  const res = await fetchWithRetry(url, 4, signal)
+  const res = await fetchWithRetry(url, 4, opts.signal)
 
   if (!res.ok) {
     throw new Error(`Search failed (HTTP ${res.status}). Please try again.`)
@@ -122,12 +147,32 @@ export async function searchCards(
   const cards = (body.data ?? []).map(toCard)
 
   // Surface cards that actually have a market price first — this app is about
-  // values, so priced results are the most useful to the collector.
+  // values, so priced results are the most useful to the collector. When
+  // browsing a whole set, keep set-number order instead.
+  if (setId && !name) return cards
   return cards.sort((a, b) => {
     const aHas = a.marketPrice != null ? 0 : 1
     const bHas = b.marketPrice != null ? 0 : 1
     return aHas - bHas
   })
+}
+
+/** Load all published sets, newest first. */
+export async function fetchSets(signal?: AbortSignal): Promise<CardSet[]> {
+  const url = `${API_BASE}/sets?pageSize=250&orderBy=-releaseDate`
+  const res = await fetchWithRetry(url, 4, signal)
+  if (!res.ok) {
+    throw new Error(`Could not load sets (HTTP ${res.status}).`)
+  }
+  const body = (await res.json()) as {
+    data?: { id: string; name: string; series?: string; releaseDate?: string }[]
+  }
+  return (body.data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    series: s.series ?? '',
+    releaseDate: s.releaseDate ?? '',
+  }))
 }
 
 /** Fetch a single card by its API id (e.g. "base1-4"). Returns null if missing. */
