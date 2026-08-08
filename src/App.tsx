@@ -17,6 +17,12 @@ function languageShort(lang: CatalogLanguage | undefined): string {
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
+  cardToEbayQuery,
+  ebaySoldSearchUrl,
+  fetchHighestEbaySold,
+  type EbayHighResult,
+} from './ebay'
+import {
   CONDITIONS,
   CONDITION_LABELS,
   CONDITION_MULTIPLIERS,
@@ -73,6 +79,117 @@ function ConditionSelect({
   )
 }
 
+function EbayHighPanel({
+  card,
+  psaGrade = null,
+}: {
+  card: Card
+  psaGrade?: PsaGrade | null
+}) {
+  const [state, setState] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'ready'; result: EbayHighResult }
+    | { status: 'error'; message: string }
+  >({ status: 'idle' })
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
+
+  // Clear cached panel when PSA changes so the next fetch matches the slab/raw line.
+  useEffect(() => {
+    setState({ status: 'idle' })
+  }, [card.id, psaGrade])
+
+  async function load(force = false) {
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+    setState({ status: 'loading' })
+    try {
+      const result = await fetchHighestEbaySold(cardToEbayQuery(card, psaGrade), {
+        signal: ac.signal,
+        force,
+      })
+      if (!ac.signal.aborted) setState({ status: 'ready', result })
+    } catch (err) {
+      if (ac.signal.aborted) return
+      const message =
+        err instanceof Error ? err.message : 'Could not load eBay sold prices.'
+      setState({ status: 'error', message })
+    }
+  }
+
+  const soldLink = ebaySoldSearchUrl(cardToEbayQuery(card, psaGrade))
+
+  return (
+    <div className="ebay-high">
+      {state.status === 'idle' && (
+        <button type="button" className="ebay-high__btn" onClick={() => void load()}>
+          eBay 30-day high
+        </button>
+      )}
+      {state.status === 'loading' && (
+        <p className="ebay-high__status">Checking eBay sold…</p>
+      )}
+      {state.status === 'ready' && (
+        <p className="ebay-high__result">
+          <span className="ebay-high__label">eBay 30d high</span>{' '}
+          {state.result.highest.url ? (
+            <a
+              className="ebay-high__price"
+              href={state.result.highest.url}
+              target="_blank"
+              rel="noreferrer"
+              title={state.result.highest.title}
+            >
+              {formatUsd(state.result.highest.price)}
+            </a>
+          ) : (
+            <span className="ebay-high__price">
+              {formatUsd(state.result.highest.price)}
+            </span>
+          )}
+          <span className="ebay-high__meta">
+            {' '}
+            · {state.result.highest.soldAt}
+            {state.result.saleCount > 1
+              ? ` · ${state.result.saleCount} sales`
+              : ''}
+            {psaGrade != null && !state.result.gradeMatched
+              ? ' · no exact PSA match'
+              : ''}
+          </span>{' '}
+          <button
+            type="button"
+            className="ebay-high__refresh"
+            onClick={() => void load(true)}
+            aria-label="Refresh eBay high"
+          >
+            Refresh
+          </button>
+        </p>
+      )}
+      {state.status === 'error' && (
+        <p className="ebay-high__error">
+          {state.message}{' '}
+          <a href={soldLink} target="_blank" rel="noreferrer">
+            Open eBay sold
+          </a>
+          {' · '}
+          <button type="button" className="ebay-high__refresh" onClick={() => void load(true)}>
+            Retry
+          </button>
+        </p>
+      )}
+    </div>
+  )
+}
+
 function SearchResult({
   card,
   onAdd,
@@ -118,6 +235,7 @@ function SearchResult({
             <span className="result__price-est"> · {condition}: {formatUsd(estimated)}</span>
           )}
         </p>
+        <EbayHighPanel card={card} />
         <div className="result__actions">
           <ConditionSelect value={condition} onChange={setCondition} />
           <button className="btn btn--add" onClick={() => onAdd(card, condition)}>
@@ -247,6 +365,7 @@ function CollectionRow({
             </div>
           </label>
         </div>
+        <EbayHighPanel card={item.card} psaGrade={item.psaGrade} />
         {advice && (
           <p
             className={`crow__advice crow__advice--${advice.verdict}`}
@@ -1354,9 +1473,11 @@ function App() {
           )}
           <p className="disclaimer">
             Values are estimates: raw cards use condition multipliers; PSA slabs use rough
-            grade multipliers vs NM market. “Worth grading?” compares an estimated PSA 10
-            minus typical fees (~$40) to your raw value — not financial advice. CSV import
-            needs a Card ID column (and optional PSA Grade) — use the template or an export.
+            grade multipliers vs NM market. eBay 30-day high is the top completed sale from
+            recent comps (not part of the collection total). “Worth grading?” compares an
+            estimated PSA 10 minus typical fees (~$40) to your raw value — not financial
+            advice. CSV import needs a Card ID column (and optional PSA Grade) — use the
+            template or an export.
           </p>
         </section>
       )}
