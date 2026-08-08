@@ -9,9 +9,10 @@ key is required for basic/low-volume use. The collection itself is stored in the
 browser via `localStorage` (key `pokedex.collection.v1`); there is no backend or
 database of our own. There is only one service to run: the Vite dev server.
 
-Key modules: `src/tcgapi.ts` (card search + price extraction) and
+Key modules: `src/tcgapi.ts` (card search + price extraction),
 `src/collection.ts` (condition grades, condition-based value math, and
-localStorage persistence). This app is about physical trading cards, not the
+localStorage persistence), and `src/ebay.ts` (highest eBay sold comps in the
+last 3 days via PriceCharting). This app is about physical trading cards, not the
 video game — do not reintroduce PokéAPI/video-game data.
 
 Standard commands live in `package.json` scripts and `README.md`; use those rather
@@ -37,6 +38,12 @@ than duplicating them here.
 - The app calls card APIs from the browser: English → `https://api.pokemontcg.io`,
   Asian langs → `https://api.tcgdex.net` (and `assets.tcgdex.net` for images).
   If searches fail with a network error, check egress rather than the app code.
+- eBay 3-day highs (`src/ebay.ts`) read PriceCharting completed sales. In
+  `pnpm dev` / `pnpm preview`, prefer the Vite middleware at `/api/ebay-high`
+  (`ebayProxyPlugin.ts`), which fetches PriceCharting directly. On static
+  GitHub Pages the client falls back to the CORS-friendly `r.jina.ai` page
+  mirror — no API key. Prefer matching PSA titles when the line is slabbed;
+  otherwise prefer raw (non-slab) comps, then fall back to any sale in-window.
 - Asian card ids are stored as `tcgdex:<lang>:<id>` (e.g. `tcgdex:ja:SV2a-025`)
   so they never collide with English pokemontcg.io ids. `fetchCardById` routes
   on that prefix.

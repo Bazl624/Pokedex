@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { ebayProxyPlugin } from './ebayProxyPlugin'
 
 // The app is deployed to GitHub Pages at https://<user>.github.io/Pokedex/,
 // so production assets must be served from the "/Pokedex/" base path. Local
@@ -10,6 +11,7 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/Pokedex/' : '/',
   plugins: [
     react(),
+    ebayProxyPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [
