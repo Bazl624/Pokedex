@@ -1,32 +1,92 @@
-# Pokedex
+# Pokémon TCG Card Collection
 
-iOS app to index a personal Pokémon card collection — inventory, condition (raw or PSA), photos, and camera-assisted cataloging.
+A small, modern web app for tracking your **Pokémon trading card** collection.
+Search real cards, record the ones you own along with their **condition**, and see
+an estimated total **value** of your collection. Card data and prices come from the
+free public [Pokémon TCG API](https://pokemontcg.io/) — no API key required for
+basic use.
 
-## Product stance
+## Features
 
-**MVP = catalog + camera scan.** Live eBay / marketplace pricing is Phase 2. You can still enter a manual dollar value per card in MVP.
+- Search the Pokémon TCG catalog by card name, **card #**, and/or set
+  (real images, sets, rarity). Pick a **language**: English (pokemontcg.io)
+  or **Japanese / Chinese / Korean** (TCGdex) for Asian prints.
+- **Scan a card with your camera**: point your phone at a card, and the app reads
+  the card name (on-device OCR) and searches for it automatically. On phones you
+  can also use **Take photo** (opens the native camera). Camera needs an
+  https/secure connection — it works on the deployed site and on localhost.
+- See each card's market price (USD). Cancel an in-flight search with **Cancel**.
+- Add cards to your collection with a condition grade (NM / LP / MP / HP / DMG)
+  and quantity.
+- **Edit** collection lines anytime: condition, PSA grade (1–10), and quantity
+  (type a number or use +/−). Estimated value updates for condition / PSA.
+  Raw cards get a **worth grading?** tip (PSA 10 estimate vs typical fees).
+- Automatic estimated value per card and a running total for the whole collection,
+  adjusted for condition / PSA.
+- **Export / Import CSV**: download your inventory, or import one. Use
+  **CSV template** on the My collection tab for the expected columns
+  (`Card ID` + `Condition` required; optional `PSA Grade`; see
+  `public/collection-template.csv`).
+- Your collection is saved locally in the browser (`localStorage`), with an
+  automatic on-device backup. It is **not** synced to the cloud — use
+  **Export CSV** as your off-device copy. On iPhone, prefer updating the existing
+  home-screen icon rather than deleting and re-adding it (that can wipe local
+  data).
 
-See Cursor skills under [`.cursor/skills/`](.cursor/skills/) for agent workflows that implement this app.
+## Tech stack
 
-| Skill | Use when |
-|---|---|
-| `pokemon-catalog-product` | Scope, MVP vs later phases |
-| `ios-swiftui-scaffold` | App structure, SwiftUI + SwiftData |
-| `collection-inventory-model` | Models for quantity, raw vs PSA |
-| `pokemon-card-camera-scan` | Camera + Vision OCR + confirm match |
-| `market-value-integrations` | Phase 2 pricing adapters |
-| `ios-xcode-build` | Build / test / Simulator |
+- [Vite](https://vite.dev/) (dev server + build)
+- [React 18](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- [ESLint](https://eslint.org/) for linting
 
-## Planned stack
+## Getting started
 
-- SwiftUI, iOS 17+
-- SwiftData (offline-first)
-- AVFoundation + Vision for on-device scan
-- Local card reference match; human confirm before save
+Requires Node.js 20+ and [pnpm](https://pnpm.io/).
 
-## Status
+```bash
+pnpm install      # install dependencies
+pnpm dev          # start the dev server at http://localhost:5173
+```
 
-Skill pack and product definition are in-repo. App source scaffolding comes next (invoke `ios-swiftui-scaffold` + `collection-inventory-model`).
+## Available scripts
+
+| Command          | Description                                        |
+| ---------------- | -------------------------------------------------- |
+| `pnpm dev`       | Start the Vite dev server (hot reload).            |
+| `pnpm build`     | Type-check and build the production bundle to `dist/`. |
+| `pnpm preview`   | Serve the production build locally.                |
+| `pnpm lint`      | Run ESLint over the project.                       |
+| `pnpm typecheck` | Run the TypeScript type checker without emitting.  |
+
+## Project structure
+
+```
+index.html          # Vite entry HTML
+public/pokeball.svg  # favicon / logo
+src/
+  main.tsx           # React entry point
+  App.tsx            # UI: tabs for Search + My Collection
+  App.css            # component styles
+  index.css          # global styles
+  tcgapi.ts          # Pokémon TCG API client + Card type
+  collection.ts      # collection model: conditions, values, localStorage
+```
+
+## Notes on values
+
+Prices are the Near Mint market price from the TCG API, adjusted by a rough
+condition multiplier (NM 100%, LP 85%, MP 70%, HP 50%, DMG 30%). These are
+ballpark estimates; real market prices vary by grade, edition, and marketplace.
+
+## Cursor agent skills
+
+Agent workflows live under [`.cursor/skills/`](.cursor/skills/). See
+[`docs/skills-manifest.md`](docs/skills-manifest.md) for versions and hashes.
+
+**Note:** Several skills were drafted for a native SwiftUI/iOS path before this
+repo shipped as a Vite + React web/PWA app. Prefer [`AGENTS.md`](AGENTS.md) and
+the current `src/` modules as source of truth for implementation until those
+skills are realigned to the web stack.
 
 ## License
 
