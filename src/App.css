@@ -953,6 +953,26 @@
   background: #9bb8ff;
 }
 
+.badge--lang {
+  background: #c9a0ff;
+  color: #1a1028;
+}
+
+.lang-filter {
+  width: 100%;
+}
+
+.lang-hint {
+  text-align: left;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #a8a8d0;
+}
+
+.result__meta .badge--lang {
+  vertical-align: middle;
+}
+
 .crow__badges {
   display: flex;
   flex-wrap: wrap;

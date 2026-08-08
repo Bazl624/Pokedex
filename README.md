@@ -9,7 +9,8 @@ basic use.
 ## Features
 
 - Search the Pokémon TCG catalog by card name, **card #**, and/or set
-  (real images, sets, rarity).
+  (real images, sets, rarity). Pick a **language**: English (pokemontcg.io)
+  or **Japanese / Chinese / Korean** (TCGdex) for Asian prints.
 - **Scan a card with your camera**: point your phone at a card, and the app reads
   the card name (on-device OCR) and searches for it automatically. On phones you
   can also use **Take photo** (opens the native camera). Camera needs an

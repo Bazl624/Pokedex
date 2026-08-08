@@ -1,4 +1,4 @@
-import type { Card } from './tcgapi'
+import { isCatalogLanguage, type Card, type CatalogLanguage } from './tcgapi'
 
 /** Card condition grades, best to worst. */
 export const CONDITIONS = [
@@ -411,6 +411,11 @@ function normalizeItem(raw: Partial<CollectionItem> & { card: Card; condition: C
   const condition = raw.condition
   const quantity = typeof raw.quantity === 'number' && raw.quantity > 0 ? raw.quantity : 1
   // Fill any missing card fields so older localStorage blobs still render.
+  const language: CatalogLanguage = isCatalogLanguage(raw.card.language)
+    ? raw.card.language
+    : raw.card.id.startsWith('tcgdex:')
+      ? ((raw.card.id.split(':')[1] as CatalogLanguage) || 'en')
+      : 'en'
   const card: Card = {
     id: raw.card.id,
     name: raw.card.name,
@@ -421,6 +426,7 @@ function normalizeItem(raw: Partial<CollectionItem> & { card: Card; condition: C
     imageLarge: raw.card.imageLarge ?? null,
     marketPrice:
       typeof raw.card.marketPrice === 'number' ? raw.card.marketPrice : null,
+    language: isCatalogLanguage(language) ? language : 'en',
   }
   return {
     key: itemKey(card.id, condition, psaGrade),

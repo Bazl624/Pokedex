@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
-import { fetchCardById, fetchSets, searchCards, type Card, type CardSet } from './tcgapi'
+import {
+  CATALOG_LANGUAGES,
+  fetchCardById,
+  fetchSets,
+  searchCards,
+  type Card,
+  type CardSet,
+  type CatalogLanguage,
+} from './tcgapi'
+
+function languageShort(lang: CatalogLanguage | undefined): string {
+  const id = lang ?? 'en'
+  return CATALOG_LANGUAGES.find((l) => l.id === id)?.short ?? id.toUpperCase()
+}
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
@@ -95,6 +108,7 @@ function SearchResult({
       <div className="result__body">
         <h3 className="result__name">{card.name}</h3>
         <p className="result__meta">
+          <span className="badge badge--lang">{languageShort(card.language)}</span>{' '}
           {card.setName} · #{card.number}
           {card.rarity ? ` · ${card.rarity}` : ''}
         </p>
@@ -159,6 +173,7 @@ function CollectionRow({
           {item.card.setName} · #{item.card.number}
         </p>
         <div className="crow__badges">
+          <span className="badge badge--lang">{languageShort(item.card.language)}</span>
           <span className={`badge badge--${item.condition.toLowerCase()}`}>
             {item.condition} · {CONDITION_LABELS[item.condition]}
           </span>
@@ -744,8 +759,10 @@ function App() {
   const [query, setQuery] = useState('')
   const [cardNumber, setCardNumber] = useState('')
   const [setId, setSetId] = useState('')
+  const [catalogLang, setCatalogLang] = useState<CatalogLanguage>('en')
   const [sets, setSets] = useState<CardSet[]>([])
   const [setsError, setSetsError] = useState<string | null>(null)
+  const [setsLoading, setSetsLoading] = useState(false)
   const [results, setResults] = useState<Card[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -811,19 +828,34 @@ function App() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setSetsLoading(true)
+      setSetsError(null)
       try {
-        const list = await fetchSets()
-        if (!cancelled) setSets(list)
+        const list = await fetchSets(catalogLang)
+        if (!cancelled) {
+          setSets(list)
+          setSetId('')
+        }
       } catch {
-        if (!cancelled) setSetsError('Could not load sets. You can still search by name.')
+        if (!cancelled) {
+          setSets([])
+          setSetsError('Could not load sets. You can still search by name.')
+        }
+      } finally {
+        if (!cancelled) setSetsLoading(false)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [catalogLang])
 
-  async function runSearch(opts: { name?: string; setId?: string; number?: string }) {
+  async function runSearch(opts: {
+    name?: string
+    setId?: string
+    number?: string
+    language?: CatalogLanguage
+  }) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -837,6 +869,7 @@ function App() {
           name: opts.name,
           setId: opts.setId,
           number: opts.number,
+          language: opts.language ?? catalogLang,
           signal: controller.signal,
         }),
       )
@@ -881,6 +914,7 @@ function App() {
         name,
         setId: setId || undefined,
         number: cardNumber || undefined,
+        language: catalogLang,
       })
     } catch {
       setError('Could not read the card. Please try again or type the name.')
@@ -895,6 +929,7 @@ function App() {
       name: query,
       setId: setId || undefined,
       number: cardNumber || undefined,
+      language: catalogLang,
     })
   }
 
@@ -1055,12 +1090,36 @@ function App() {
       {tab === 'search' && (
         <section className={isHomeEmpty ? 'home-panel' : undefined}>
           <form className="search-form" onSubmit={handleSearch}>
+            <label className="set-filter lang-filter">
+              <span className="set-filter__label">Lang</span>
+              <select
+                className="condition-select set-filter__select"
+                value={catalogLang}
+                onChange={(e) => {
+                  setCatalogLang(e.target.value as CatalogLanguage)
+                  setResults([])
+                  setSearched(false)
+                  setError(null)
+                }}
+                aria-label="Catalog language"
+              >
+                {CATALOG_LANGUAGES.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="search">
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Card name (optional)"
+                placeholder={
+                  catalogLang === 'en'
+                    ? 'Card name (optional)'
+                    : 'Name in this language (e.g. ピカチュウ)'
+                }
                 aria-label="Card name"
                 autoFocus
               />
@@ -1094,18 +1153,28 @@ function App() {
                   value={setId}
                   onChange={(e) => setSetId(e.target.value)}
                   aria-label="Filter by set"
+                  disabled={setsLoading}
                 >
-                  <option value="">All sets</option>
+                  <option value="">
+                    {setsLoading ? 'Loading sets…' : 'All sets'}
+                  </option>
                   {sets.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
-                      {s.series ? ` (${s.series})` : ''}
+                      {catalogLang === 'en' && s.series ? ` (${s.series})` : ''}
                     </option>
                   ))}
                 </select>
               </label>
             </div>
             {setsError && <p className="hint">{setsError}</p>}
+            {catalogLang !== 'en' && (
+              <p className="hint lang-hint">
+                Asian catalogs come from TCGdex. Search names in that language
+                (日本語 / 中文 / 한국어). Prices are Cardmarket estimates when
+                available — coverage varies by locale.
+              </p>
+            )}
           </form>
 
           <div className="scan-buttons">
@@ -1129,8 +1198,9 @@ function App() {
 
           {!searched && !error && (
             <p className="hint">
-              Search by name, card #, set, or any combo. Pair # with a set for a precise hit.
-              Check multiple cards to add them at once.
+              Search by name, card #, set, or any combo. Switch Lang for Japanese /
+              Chinese / Korean sets. Pair # with a set for a precise hit. Check
+              multiple cards to add them at once.
             </p>
           )}
 
