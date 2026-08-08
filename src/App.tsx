@@ -763,6 +763,8 @@ function App() {
   const [sets, setSets] = useState<CardSet[]>([])
   const [setsError, setSetsError] = useState<string | null>(null)
   const [setsLoading, setSetsLoading] = useState(false)
+  /** Bump to re-fetch sets after a failure (pokemontcg.io is often flaky). */
+  const [setsReloadToken, setSetsReloadToken] = useState(0)
   const [results, setResults] = useState<Card[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -834,7 +836,7 @@ function App() {
         const list = await fetchSets(catalogLang)
         if (!cancelled) {
           setSets(list)
-          setSetId('')
+          setSetsError(null)
         }
       } catch {
         if (!cancelled) {
@@ -848,6 +850,11 @@ function App() {
     return () => {
       cancelled = true
     }
+  }, [catalogLang, setsReloadToken])
+
+  // Reset set selection when switching catalog language.
+  useEffect(() => {
+    setSetId('')
   }, [catalogLang])
 
   async function runSearch(opts: {
@@ -1167,7 +1174,25 @@ function App() {
                 </select>
               </label>
             </div>
-            {setsError && <p className="hint">{setsError}</p>}
+            {(setsError || setsLoading) && (
+              <div className="sets-status">
+                {setsLoading && (
+                  <p className="hint sets-status__msg">Loading sets…</p>
+                )}
+                {setsError && !setsLoading && (
+                  <>
+                    <p className="hint sets-status__msg">{setsError}</p>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => setSetsReloadToken((n) => n + 1)}
+                    >
+                      Retry sets
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             {catalogLang !== 'en' && (
               <p className="hint lang-hint">
                 Asian catalogs come from TCGdex. Type an <strong>English</strong>{' '}

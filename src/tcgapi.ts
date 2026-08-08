@@ -160,7 +160,7 @@ async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
     parts.push(`name:"${name.replace(/"/g, '')}"`)
   }
   if (setId) {
-    parts.push(`set.id:${setId.replace(/[^\w-]/g, '')}`)
+    parts.push(`set.id:${setId.replace(/[^\w.-]/g, '')}`)
   }
   if (number) {
     parts.push(`number:"${number}"`)
@@ -171,21 +171,30 @@ async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
     `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
     `&pageSize=${pageSize}&orderBy=number`
 
-  const res = await fetchWithRetry(url, 4, opts.signal)
-
-  if (!res.ok) {
-    throw new Error(`Search failed (HTTP ${res.status}). Please try again.`)
+  try {
+    const res = await fetchWithRetry(url, 4, opts.signal)
+    if (res.ok) {
+      const body = (await res.json()) as { data?: RawCard[] }
+      const cards = (body.data ?? []).map(toCard)
+      // Set list may have come from TCGdex fallback with ids pokemontcg.io
+      // doesn't know — fall through to TCGdex when the set browse is empty.
+      if (cards.length > 0 || !setId) {
+        if (browsingSet || (number && !name)) return cards
+        return cards.sort((a, b) => {
+          const aHas = a.marketPrice != null ? 0 : 1
+          const bHas = b.marketPrice != null ? 0 : 1
+          return aHas - bHas
+        })
+      }
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    // Fall through to TCGdex when pokemontcg.io is down.
+    if (!setId && !name && !number) throw err
   }
 
-  const body = (await res.json()) as { data?: RawCard[] }
-  const cards = (body.data ?? []).map(toCard)
-
-  if (browsingSet || (number && !name)) return cards
-  return cards.sort((a, b) => {
-    const aHas = a.marketPrice != null ? 0 : 1
-    const bHas = b.marketPrice != null ? 0 : 1
-    return aHas - bHas
-  })
+  // Reliable fallback (also covers TCGdex-only set ids after a sets fallback).
+  return searchTcgdexCards('en', { ...opts, language: 'en', pageSize })
 }
 
 /**
@@ -200,28 +209,66 @@ export async function searchCards(options: SearchOptions | string): Promise<Card
   return searchTcgdexCards(language, opts)
 }
 
-/** Load published sets for a catalog language, newest first when possible. */
-export async function fetchSets(
-  language: CatalogLanguage = 'en',
-  signal?: AbortSignal,
-): Promise<CardSet[]> {
-  if (language === 'en') {
-    const url = `${API_BASE}/sets?pageSize=250&orderBy=-releaseDate`
-    const res = await fetchWithRetry(url, 4, signal)
+/**
+ * Load English sets from pokemontcg.io in smaller pages — large pageSize=250
+ * requests frequently 500/502 from Cloudflare.
+ */
+async function fetchPokemonTcgSets(signal?: AbortSignal): Promise<CardSet[]> {
+  const pageSize = 100
+  const sets: CardSet[] = []
+  for (let page = 1; page <= 5; page++) {
+    const url =
+      `${API_BASE}/sets?page=${page}&pageSize=${pageSize}&orderBy=-releaseDate`
+    const res = await fetchWithRetry(url, 5, signal)
     if (!res.ok) {
       throw new Error(`Could not load sets (HTTP ${res.status}).`)
     }
     const body = (await res.json()) as {
       data?: { id: string; name: string; series?: string; releaseDate?: string }[]
+      totalCount?: number
     }
-    return (body.data ?? []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      series: s.series ?? '',
-      releaseDate: s.releaseDate ?? '',
-    }))
+    const batch = body.data ?? []
+    for (const s of batch) {
+      sets.push({
+        id: s.id,
+        name: s.name,
+        series: s.series ?? '',
+        releaseDate: s.releaseDate ?? '',
+      })
+    }
+    if (batch.length < pageSize) break
+    if (typeof body.totalCount === 'number' && sets.length >= body.totalCount) break
   }
-  return fetchTcgdexSets(language, signal)
+  if (sets.length === 0) {
+    throw new Error('Could not load sets (empty response).')
+  }
+  return sets
+}
+
+/** Load published sets for a catalog language, newest first when possible. */
+export async function fetchSets(
+  language: CatalogLanguage = 'en',
+  signal?: AbortSignal,
+): Promise<CardSet[]> {
+  if (language !== 'en') {
+    return fetchTcgdexSets(language, signal)
+  }
+
+  // pokemontcg.io is flaky — try it first (ids match English card search),
+  // then fall back to TCGdex so the Set dropdown is never empty.
+  try {
+    return await fetchPokemonTcgSets(signal)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    try {
+      return await fetchTcgdexSets('en', signal)
+    } catch (fallbackErr) {
+      if (fallbackErr instanceof DOMException && fallbackErr.name === 'AbortError') {
+        throw fallbackErr
+      }
+      throw err instanceof Error ? err : new Error('Could not load sets.')
+    }
+  }
 }
 
 /**

@@ -110,11 +110,13 @@ async function listDexCards(
  * national dexId / same card id.
  */
 async function resolveLatinNameToTargetBriefs(
-  lang: Exclude<CatalogLanguage, 'en'>,
+  lang: CatalogLanguage,
   englishName: string,
   pageSize: number,
   signal?: AbortSignal,
 ): Promise<DexBriefCard[]> {
+  // No need to bridge when already searching the English TCGdex catalog.
+  if (lang === 'en') return []
   // 1) Cross-language name index (rolling out on TCGdex; no-op if empty).
   try {
     const anyParams = new URLSearchParams({
@@ -189,10 +191,10 @@ export function makeDexCardId(lang: CatalogLanguage, dexId: string): string {
 
 export function parseDexCardId(
   id: string,
-): { lang: Exclude<CatalogLanguage, 'en'>; dexId: string } | null {
-  const m = /^tcgdex:(ja|zh-tw|zh-cn|ko):(.+)$/.exec(id.trim())
+): { lang: CatalogLanguage; dexId: string } | null {
+  const m = /^tcgdex:(en|ja|zh-tw|zh-cn|ko):(.+)$/.exec(id.trim())
   if (!m) return null
-  return { lang: m[1] as Exclude<CatalogLanguage, 'en'>, dexId: m[2] }
+  return { lang: m[1] as CatalogLanguage, dexId: m[2] }
 }
 
 function imageUrls(image: string | undefined): {
@@ -333,12 +335,12 @@ async function fetchDexSetDetail(
 }
 
 /**
- * Search Asian TCGdex catalogs. Accepts names in the selected language or in
- * English (e.g. Lang=日本語 + "Flareon" → ブースター / フレアロン). Use Lang to
- * pick JP / ZH / KO; pair card # with a set when possible.
+ * Search TCGdex catalogs (Asian langs, or English as a pokemontcg.io fallback).
+ * Asian langs accept English names (e.g. Lang=日本語 + "Flareon"). Pair card #
+ * with a set when possible.
  */
 export async function searchTcgdexCards(
-  lang: Exclude<CatalogLanguage, 'en'>,
+  lang: CatalogLanguage,
   opts: SearchOptions,
 ): Promise<Card[]> {
   const name = (opts.name ?? '').trim()
@@ -351,7 +353,7 @@ export async function searchTcgdexCards(
   const browsingSet = Boolean(setId && !name && !number)
   const pageSize = opts.pageSize ?? (browsingSet || number ? 48 : 24)
   const setNameById = new Map<string, string>()
-  const latinName = Boolean(name && looksLatinQuery(name))
+  const latinName = Boolean(name && looksLatinQuery(name) && lang !== 'en')
 
   let briefs: DexBriefCard[] = []
 
@@ -443,26 +445,30 @@ export async function searchTcgdexCards(
 }
 
 export async function fetchTcgdexSets(
-  lang: Exclude<CatalogLanguage, 'en'>,
+  lang: CatalogLanguage,
   signal?: AbortSignal,
 ): Promise<CardSet[]> {
   const url = `${DEX_BASE}/${lang}/sets`
-  const res = await fetchWithRetry(url, 4, signal)
+  const res = await fetchWithRetry(url, 5, signal)
   if (!res.ok) {
     throw new Error(`Could not load sets (HTTP ${res.status}).`)
   }
-  const body = (await res.json()) as DexSetListItem[]
+  const body = (await res.json()) as unknown
+  if (!Array.isArray(body)) {
+    throw new Error('Could not load sets (unexpected response).')
+  }
+  const list = body as DexSetListItem[]
   // Newest-ish last in many locales — reverse so recent sets appear first.
-  return [...body].reverse().map((s) => ({
+  return [...list].reverse().map((s) => ({
     id: s.id,
     name: s.name,
-    series: lang.toUpperCase(),
+    series: lang === 'en' ? '' : lang.toUpperCase(),
     releaseDate: '',
   }))
 }
 
 export async function fetchTcgdexCardById(
-  lang: Exclude<CatalogLanguage, 'en'>,
+  lang: CatalogLanguage,
   dexId: string,
   signal?: AbortSignal,
 ): Promise<Card | null> {
