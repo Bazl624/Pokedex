@@ -77,3 +77,17 @@ src/
 Prices are the Near Mint market price from the TCG API, adjusted by a rough
 condition multiplier (NM 100%, LP 85%, MP 70%, HP 50%, DMG 30%). These are
 ballpark estimates; real market prices vary by grade, edition, and marketplace.
+
+## Cursor agent skills
+
+Agent workflows live under [`.cursor/skills/`](.cursor/skills/). See
+[`docs/skills-manifest.md`](docs/skills-manifest.md) for versions and hashes.
+
+**Note:** Several skills were drafted for a native SwiftUI/iOS path before this
+repo shipped as a Vite + React web/PWA app. Prefer [`AGENTS.md`](AGENTS.md) and
+the current `src/` modules as source of truth for implementation until those
+skills are realigned to the web stack.
+
+## License
+
+Unlicense — see [LICENSE](LICENSE).
