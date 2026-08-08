@@ -16,8 +16,8 @@ basic use.
   can also use **Take photo** (opens the native camera). Camera needs an
   https/secure connection — it works on the deployed site and on localhost.
 - See each card's market price (USD). Cancel an in-flight search with **Cancel**.
-- **eBay 3-day high**: tap to pull the highest completed eBay sale for that
-  printing in the last 3 days (PriceCharting sold comps; PSA lines prefer matching
+- **eBay 30-day high**: tap to pull the highest completed eBay sale for that
+  printing in the last 30 days (PriceCharting sold comps; PSA lines prefer matching
   slab sales). Collection value estimates still use TCG market × condition/PSA.
 - Add cards to your collection with a condition grade (NM / LP / MP / HP / DMG)
   and quantity.
@@ -73,7 +73,7 @@ src/
   index.css          # global styles
   tcgapi.ts          # Pokémon TCG API client + Card type
   collection.ts      # collection model: conditions, values, localStorage
-  ebay.ts / ebayShared.ts  # eBay 3-day high from sold comps
+  ebay.ts / ebayShared.ts  # eBay 30-day high from sold comps
 ebayProxyPlugin.ts  # Vite /api/ebay-high middleware (dev/preview)
 ```
 
@@ -81,7 +81,7 @@ ebayProxyPlugin.ts  # Vite /api/ebay-high middleware (dev/preview)
 
 Collection totals use the Near Mint market price from the TCG API, adjusted by a
 rough condition multiplier (NM 100%, LP 85%, MP 70%, HP 50%, DMG 30%) or PSA
-multipliers for slabs. **eBay 3-day high** is a separate sold-comp readout (not
+multipliers for slabs. **eBay 30-day high** is a separate sold-comp readout (not
 folded into the running total). Real market prices vary by grade, edition, and
 marketplace.
 

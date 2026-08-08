@@ -2,7 +2,7 @@ import type { Plugin, PreviewServer, ViteDevServer } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 const PC_ORIGIN = 'https://www.pricecharting.com'
-const EBAY_LOOKBACK_DAYS = 3
+const EBAY_LOOKBACK_DAYS = 30
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
@@ -100,8 +100,12 @@ function isoDaysAgo(days: number): string {
   return isoLocal(d)
 }
 
+function looksGraded(title: string): boolean {
+  return /\b(PSA|BGS|CGC|SGC|TAG|ACE)\b/i.test(title)
+}
+
 function saleMatchesPsa(sale: EbaySoldSale, psa: number | null | undefined): boolean {
-  if (psa == null) return !/\b(PSA|BGS|CGC|SGC)\s*\d/i.test(sale.title)
+  if (psa == null) return !looksGraded(sale.title)
   return new RegExp(`\\bPSA\\s*${psa}\\b`, 'i').test(sale.title)
 }
 
@@ -123,11 +127,11 @@ function pickHighestInWindow(
     }
   }
   if (psaGrade != null) {
-    const anyPsa = inWindow.filter((s) => /\bPSA\s*\d/i.test(s.title))
-    if (anyPsa.length > 0) {
+    const anySlab = inWindow.filter((s) => looksGraded(s.title))
+    if (anySlab.length > 0) {
       return {
-        highest: anyPsa.reduce((a, b) => (b.price > a.price ? b : a)),
-        saleCount: anyPsa.length,
+        highest: anySlab.reduce((a, b) => (b.price > a.price ? b : a)),
+        saleCount: anySlab.length,
         gradeMatched: false,
       }
     }
@@ -197,7 +201,7 @@ async function handleEbayHigh(req: IncomingMessage, res: ServerResponse) {
   const psaRaw = url.searchParams.get('psa')
   const days = Math.max(
     1,
-    Math.min(30, Number(url.searchParams.get('days') ?? EBAY_LOOKBACK_DAYS) || EBAY_LOOKBACK_DAYS),
+    Math.min(90, Number(url.searchParams.get('days') ?? EBAY_LOOKBACK_DAYS) || EBAY_LOOKBACK_DAYS),
   )
   const psaNum = psaRaw ? Number(psaRaw) : NaN
   const psaGrade = Number.isFinite(psaNum) ? psaNum : null

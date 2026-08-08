@@ -1,5 +1,5 @@
 /** Look back this many calendar days for completed eBay sales. */
-export const EBAY_LOOKBACK_DAYS = 3
+export const EBAY_LOOKBACK_DAYS = 30
 
 export interface EbaySoldSale {
   soldAt: string // YYYY-MM-DD
@@ -161,9 +161,14 @@ function isoTodayLocal(): string {
   return `${y}-${m}-${day}`
 }
 
+/** True when the listing title looks like a graded slab. */
+function looksGraded(title: string): boolean {
+  return /\b(PSA|BGS|CGC|SGC|TAG|ACE)\b/i.test(title)
+}
+
 function saleMatchesPsa(sale: EbaySoldSale, psa: number | null | undefined): boolean {
   if (psa == null) {
-    return !/\b(PSA|BGS|CGC|SGC)\s*\d/i.test(sale.title)
+    return !looksGraded(sale.title)
   }
   const re = new RegExp(`\\bPSA\\s*${psa}\\b`, 'i')
   return re.test(sale.title)
@@ -188,13 +193,13 @@ export function pickHighestInWindow(
     }
   }
 
-  // Requested a PSA grade but none matched — prefer any PSA slab over raw.
+  // Requested a PSA grade but none matched — prefer any slab over raw.
   if (psaGrade != null) {
-    const anyPsa = inWindow.filter((s) => /\bPSA\s*\d/i.test(s.title))
-    if (anyPsa.length > 0) {
+    const anySlab = inWindow.filter((s) => looksGraded(s.title))
+    if (anySlab.length > 0) {
       return {
-        highest: anyPsa.reduce((a, b) => (b.price > a.price ? b : a)),
-        saleCount: anyPsa.length,
+        highest: anySlab.reduce((a, b) => (b.price > a.price ? b : a)),
+        saleCount: anySlab.length,
         gradeMatched: false,
       }
     }

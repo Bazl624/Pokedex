@@ -130,7 +130,7 @@ function EbayHighPanel({
     <div className="ebay-high">
       {state.status === 'idle' && (
         <button type="button" className="ebay-high__btn" onClick={() => void load()}>
-          eBay 3-day high
+          eBay 30-day high
         </button>
       )}
       {state.status === 'loading' && (
@@ -138,7 +138,7 @@ function EbayHighPanel({
       )}
       {state.status === 'ready' && (
         <p className="ebay-high__result">
-          <span className="ebay-high__label">eBay 3d high</span>{' '}
+          <span className="ebay-high__label">eBay 30d high</span>{' '}
           {state.result.highest.url ? (
             <a
               className="ebay-high__price"
@@ -1473,7 +1473,7 @@ function App() {
           )}
           <p className="disclaimer">
             Values are estimates: raw cards use condition multipliers; PSA slabs use rough
-            grade multipliers vs NM market. eBay 3-day high is the top completed sale from
+            grade multipliers vs NM market. eBay 30-day high is the top completed sale from
             recent comps (not part of the collection total). “Worth grading?” compares an
             estimated PSA 10 minus typical fees (~$40) to your raw value — not financial
             advice. CSV import needs a Card ID column (and optional PSA Grade) — use the

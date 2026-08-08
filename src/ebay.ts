@@ -122,7 +122,7 @@ async function fetchViaJinaComps(
 }
 
 /**
- * Highest completed eBay sale for a card printing in the last 3 days.
+ * Highest completed eBay sale for a card printing in the last 30 days.
  * Uses the local Vite `/api/ebay-high` proxy when available; otherwise reads
  * PriceCharting sold comps via a CORS-friendly page mirror (no API key).
  */
