@@ -73,7 +73,7 @@ function scoreProductUrl(url: string, q: EbayQuery): number {
 function parseEbaySalesFromHtml(html: string): EbaySoldSale[] {
   const sales: EbaySoldSale[] = []
   const rowRe =
-    /<tr id="ebay-\d+">\s*<td class="date">(\d{4}-\d{2}-\d{2})<\/td>[\s\S]*?class="js-ebay-completed-sale"\s*href="([^"]+)"\s*>\s*([^<]+?)(?:<\/a>)?[\s\S]*?class="js-price"[^>]*>\s*\$([0-9,.]+)/g
+    /<tr id="ebay-\d+">\s*<td class="date">(\d{4}-\d{2}-\d{2})<\/td>[\s\S]*?class="js-ebay-completed-sale"\s*href="([^"]+)"\s*>\s*([^<]+?)\s*<\/a>[\s\S]*?class="js-price"[^>]*>\s*\$([0-9,.]+)/g
   for (const m of html.matchAll(rowRe)) {
     const price = Number(m[4].replace(/,/g, ''))
     if (!Number.isFinite(price)) continue
@@ -87,10 +87,17 @@ function parseEbaySalesFromHtml(html: string): EbaySoldSale[] {
   return sales
 }
 
+function isoLocal(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function isoDaysAgo(days: number): string {
   const d = new Date()
   d.setDate(d.getDate() - days)
-  return d.toISOString().slice(0, 10)
+  return isoLocal(d)
 }
 
 function saleMatchesPsa(sale: EbaySoldSale, psa: number | null | undefined): boolean {
@@ -102,16 +109,33 @@ function pickHighestInWindow(
   sales: EbaySoldSale[],
   days: number,
   psaGrade?: number | null,
-): { highest: EbaySoldSale; saleCount: number } | null {
+): { highest: EbaySoldSale; saleCount: number; gradeMatched: boolean } | null {
   const cutoff = isoDaysAgo(days)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = isoLocal(new Date())
   const inWindow = sales.filter((s) => s.soldAt >= cutoff && s.soldAt <= today)
   if (inWindow.length === 0) return null
   const matched = inWindow.filter((s) => saleMatchesPsa(s, psaGrade))
-  const pool = matched.length > 0 ? matched : inWindow
+  if (matched.length > 0) {
+    return {
+      highest: matched.reduce((a, b) => (b.price > a.price ? b : a)),
+      saleCount: matched.length,
+      gradeMatched: true,
+    }
+  }
+  if (psaGrade != null) {
+    const anyPsa = inWindow.filter((s) => /\bPSA\s*\d/i.test(s.title))
+    if (anyPsa.length > 0) {
+      return {
+        highest: anyPsa.reduce((a, b) => (b.price > a.price ? b : a)),
+        saleCount: anyPsa.length,
+        gradeMatched: false,
+      }
+    }
+  }
   return {
-    highest: pool.reduce((a, b) => (b.price > a.price ? b : a)),
-    saleCount: pool.length,
+    highest: inWindow.reduce((a, b) => (b.price > a.price ? b : a)),
+    saleCount: inWindow.length,
+    gradeMatched: false,
   }
 }
 
@@ -201,6 +225,7 @@ async function handleEbayHigh(req: IncomingMessage, res: ServerResponse) {
       saleCount: picked.saleCount,
       sourceUrl: productUrl,
       days,
+      gradeMatched: picked.gradeMatched,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'eBay lookup failed'

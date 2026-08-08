@@ -117,6 +117,7 @@ async function fetchViaJinaComps(
     saleCount: picked.saleCount,
     sourceUrl: productUrl,
     days: EBAY_LOOKBACK_DAYS,
+    gradeMatched: picked.gradeMatched,
   }
 }
 

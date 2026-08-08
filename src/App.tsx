@@ -160,6 +160,9 @@ function EbayHighPanel({
             {state.result.saleCount > 1
               ? ` · ${state.result.saleCount} sales`
               : ''}
+            {psaGrade != null && !state.result.gradeMatched
+              ? ' · no exact PSA match'
+              : ''}
           </span>{' '}
           <button
             type="button"

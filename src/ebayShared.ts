@@ -10,12 +10,17 @@ export interface EbaySoldSale {
 
 export interface EbayHighResult {
   highest: EbaySoldSale
-  /** Number of completed sales in the lookback window. */
+  /** Number of completed sales used for the high (after grade filter). */
   saleCount: number
   /** PriceCharting product page used as the comps source. */
   sourceUrl: string
   /** Lookback window in days. */
   days: number
+  /**
+   * True when the returned sale matched the requested PSA filter (or raw
+   * filter). False when we fell back to a broader in-window pool.
+   */
+  gradeMatched: boolean
 }
 
 export interface EbayCardQuery {
@@ -125,7 +130,7 @@ export function parseEbaySalesFromMarkdown(markdown: string): EbaySoldSale[] {
 export function parseEbaySalesFromHtml(html: string): EbaySoldSale[] {
   const sales: EbaySoldSale[] = []
   const rowRe =
-    /<tr id="ebay-\d+">\s*<td class="date">(\d{4}-\d{2}-\d{2})<\/td>[\s\S]*?class="js-ebay-completed-sale"\s*href="([^"]+)"\s*>\s*([^<]+?)(?:<\/a>)?[\s\S]*?class="js-price"[^>]*>\s*\$([0-9,.]+)/g
+    /<tr id="ebay-\d+">\s*<td class="date">(\d{4}-\d{2}-\d{2})<\/td>[\s\S]*?class="js-ebay-completed-sale"\s*href="([^"]+)"\s*>\s*([^<]+?)\s*<\/a>[\s\S]*?class="js-price"[^>]*>\s*\$([0-9,.]+)/g
   for (const m of html.matchAll(rowRe)) {
     const price = Number(m[4].replace(/,/g, ''))
     if (!Number.isFinite(price)) continue
@@ -168,19 +173,38 @@ export function pickHighestInWindow(
   sales: EbaySoldSale[],
   days: number,
   psaGrade?: number | null,
-): { highest: EbaySoldSale; saleCount: number } | null {
+): { highest: EbaySoldSale; saleCount: number; gradeMatched: boolean } | null {
   const cutoff = isoDaysAgo(days)
   const today = isoTodayLocal()
   const inWindow = sales.filter((s) => s.soldAt >= cutoff && s.soldAt <= today)
   if (inWindow.length === 0) return null
 
   const matched = inWindow.filter((s) => saleMatchesPsa(s, psaGrade))
-  const pool = matched.length > 0 ? matched : inWindow
-  let highest = pool[0]
-  for (const s of pool) {
-    if (s.price > highest.price) highest = s
+  if (matched.length > 0) {
+    return {
+      highest: matched.reduce((a, b) => (b.price > a.price ? b : a)),
+      saleCount: matched.length,
+      gradeMatched: true,
+    }
   }
-  return { highest, saleCount: pool.length }
+
+  // Requested a PSA grade but none matched — prefer any PSA slab over raw.
+  if (psaGrade != null) {
+    const anyPsa = inWindow.filter((s) => /\bPSA\s*\d/i.test(s.title))
+    if (anyPsa.length > 0) {
+      return {
+        highest: anyPsa.reduce((a, b) => (b.price > a.price ? b : a)),
+        saleCount: anyPsa.length,
+        gradeMatched: false,
+      }
+    }
+  }
+
+  return {
+    highest: inWindow.reduce((a, b) => (b.price > a.price ? b : a)),
+    saleCount: inWindow.length,
+    gradeMatched: false,
+  }
 }
 
 /** Public eBay sold search (highest price first). */
