@@ -1,4 +1,32 @@
+import {
+  fetchTcgdexCardById,
+  fetchTcgdexSets,
+  parseDexCardId,
+  searchTcgdexCards,
+} from './tcgdex'
+
 const API_BASE = 'https://api.pokemontcg.io/v2'
+
+/** Catalog language. English uses pokemontcg.io; Asian langs use TCGdex. */
+export type CatalogLanguage = 'en' | 'ja' | 'zh-tw' | 'zh-cn' | 'ko'
+
+export const CATALOG_LANGUAGES: {
+  id: CatalogLanguage
+  label: string
+  short: string
+}[] = [
+  { id: 'en', label: 'English', short: 'EN' },
+  { id: 'ja', label: '日本語 (Japanese)', short: 'JP' },
+  { id: 'zh-tw', label: '繁體中文 (Traditional)', short: 'ZH-TW' },
+  { id: 'zh-cn', label: '简体中文 (Simplified)', short: 'ZH-CN' },
+  { id: 'ko', label: '한국어 (Korean)', short: 'KO' },
+]
+
+export function isCatalogLanguage(v: unknown): v is CatalogLanguage {
+  return (
+    v === 'en' || v === 'ja' || v === 'zh-tw' || v === 'zh-cn' || v === 'ko'
+  )
+}
 
 export interface Card {
   id: string
@@ -10,6 +38,8 @@ export interface Card {
   imageLarge: string | null
   /** Representative market price in USD, or null when unknown. */
   marketPrice: number | null
+  /** Catalog language this card was loaded from. Defaults to English. */
+  language: CatalogLanguage
 }
 
 export interface CardSet {
@@ -65,6 +95,7 @@ function toCard(raw: RawCard): Card {
     imageSmall: raw.images?.small ?? null,
     imageLarge: raw.images?.large ?? null,
     marketPrice: extractMarketPrice(raw),
+    language: 'en',
   }
 }
 
@@ -100,39 +131,42 @@ async function fetchWithRetry(
 }
 
 export interface SearchOptions {
-  /** Card name (optional if setId is provided). */
+  /** Card name (optional if setId or number is provided). */
   name?: string
-  /** Set id filter, e.g. "base1" (optional if name is provided). */
+  /** Set id filter, e.g. "base1" (optional if name or number is provided). */
   setId?: string
+  /**
+   * Collector number within a set, e.g. "4", "25", "TG01".
+   * Pair with setId when possible — the same number exists in many sets.
+   */
+  number?: string
+  /** Catalog language (default English / pokemontcg.io). */
+  language?: CatalogLanguage
   signal?: AbortSignal
   /** Max results (default 48 when filtering by set, else 24). */
   pageSize?: number
 }
 
-/**
- * Search the Pokémon TCG catalog by card name and/or set. Returns cards with
- * priced results first. Throws an Error with a friendly message on failure.
- * Pass an AbortSignal to cancel an in-flight search.
- */
-export async function searchCards(options: SearchOptions | string): Promise<Card[]> {
-  // Back-compat: older call sites passed (query, signal?).
-  const opts: SearchOptions =
-    typeof options === 'string' ? { name: options } : options
+async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
   const name = (opts.name ?? '').trim()
   const setId = (opts.setId ?? '').trim()
-  if (!name && !setId) {
-    throw new Error('Enter a card name and/or pick a set to search.')
+  const number = (opts.number ?? '').trim().replace(/^#/, '').replace(/"/g, '')
+  if (!name && !setId && !number) {
+    throw new Error('Enter a card name, number, and/or pick a set to search.')
   }
 
   const parts: string[] = []
   if (name) {
-    // Quoted name query does token "contains" matching and safely handles spaces.
     parts.push(`name:"${name.replace(/"/g, '')}"`)
   }
   if (setId) {
     parts.push(`set.id:${setId.replace(/[^\w-]/g, '')}`)
   }
-  const pageSize = opts.pageSize ?? (setId && !name ? 48 : 24)
+  if (number) {
+    parts.push(`number:"${number}"`)
+  }
+  const browsingSet = Boolean(setId && !name && !number)
+  const pageSize = opts.pageSize ?? (browsingSet || number ? 48 : 24)
   const url =
     `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
     `&pageSize=${pageSize}&orderBy=number`
@@ -146,10 +180,7 @@ export async function searchCards(options: SearchOptions | string): Promise<Card
   const body = (await res.json()) as { data?: RawCard[] }
   const cards = (body.data ?? []).map(toCard)
 
-  // Surface cards that actually have a market price first — this app is about
-  // values, so priced results are the most useful to the collector. When
-  // browsing a whole set, keep set-number order instead.
-  if (setId && !name) return cards
+  if (browsingSet || (number && !name)) return cards
   return cards.sort((a, b) => {
     const aHas = a.marketPrice != null ? 0 : 1
     const bHas = b.marketPrice != null ? 0 : 1
@@ -157,33 +188,59 @@ export async function searchCards(options: SearchOptions | string): Promise<Card
   })
 }
 
-/** Load all published sets, newest first. */
-export async function fetchSets(signal?: AbortSignal): Promise<CardSet[]> {
-  const url = `${API_BASE}/sets?pageSize=250&orderBy=-releaseDate`
-  const res = await fetchWithRetry(url, 4, signal)
-  if (!res.ok) {
-    throw new Error(`Could not load sets (HTTP ${res.status}).`)
-  }
-  const body = (await res.json()) as {
-    data?: { id: string; name: string; series?: string; releaseDate?: string }[]
-  }
-  return (body.data ?? []).map((s) => ({
-    id: s.id,
-    name: s.name,
-    series: s.series ?? '',
-    releaseDate: s.releaseDate ?? '',
-  }))
+/**
+ * Search the Pokémon TCG catalog by card name, set, and/or collector number.
+ * English → pokemontcg.io; Japanese / Chinese / Korean → TCGdex.
+ */
+export async function searchCards(options: SearchOptions | string): Promise<Card[]> {
+  const opts: SearchOptions =
+    typeof options === 'string' ? { name: options } : options
+  const language = opts.language ?? 'en'
+  if (language === 'en') return searchEnglishCards(opts)
+  return searchTcgdexCards(language, opts)
 }
 
-/** Fetch a single card by its API id (e.g. "base1-4"). Returns null if missing. */
+/** Load published sets for a catalog language, newest first when possible. */
+export async function fetchSets(
+  language: CatalogLanguage = 'en',
+  signal?: AbortSignal,
+): Promise<CardSet[]> {
+  if (language === 'en') {
+    const url = `${API_BASE}/sets?pageSize=250&orderBy=-releaseDate`
+    const res = await fetchWithRetry(url, 4, signal)
+    if (!res.ok) {
+      throw new Error(`Could not load sets (HTTP ${res.status}).`)
+    }
+    const body = (await res.json()) as {
+      data?: { id: string; name: string; series?: string; releaseDate?: string }[]
+    }
+    return (body.data ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      series: s.series ?? '',
+      releaseDate: s.releaseDate ?? '',
+    }))
+  }
+  return fetchTcgdexSets(language, signal)
+}
+
+/**
+ * Fetch a single card by id. English ids are pokemontcg.io ids (e.g. "base1-4").
+ * Asian cards use `tcgdex:<lang>:<id>` (e.g. "tcgdex:ja:SV2a-025").
+ */
 export async function fetchCardById(
   id: string,
   signal?: AbortSignal,
 ): Promise<Card | null> {
   const slug = id.trim()
   if (!slug) return null
+
+  const dex = parseDexCardId(slug)
+  if (dex) {
+    return fetchTcgdexCardById(dex.lang, dex.dexId, signal)
+  }
+
   const url = `${API_BASE}/cards/${encodeURIComponent(slug)}`
-  // More retries — single-card GETs occasionally 500 from Cloudflare.
   const res = await fetchWithRetry(url, 5, signal)
   if (res.status === 404) return null
   if (!res.ok) {

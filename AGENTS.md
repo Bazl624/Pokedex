@@ -34,12 +34,17 @@ than duplicating them here.
   is explicitly allowlisted via `pnpm.onlyBuiltDependencies` in `package.json`, so
   a plain `pnpm install` runs its postinstall automatically. Do not run the
   interactive `pnpm approve-builds`.
-- The app calls the Pokémon TCG API directly from the browser, so testing requires
-  outbound network access to `https://api.pokemontcg.io`. If searches fail with a
-  network error, check egress rather than the app code.
+- The app calls card APIs from the browser: English → `https://api.pokemontcg.io`,
+  Asian langs → `https://api.tcgdex.net` (and `assets.tcgdex.net` for images).
+  If searches fail with a network error, check egress rather than the app code.
+- Asian card ids are stored as `tcgdex:<lang>:<id>` (e.g. `tcgdex:ja:SV2a-025`)
+  so they never collide with English pokemontcg.io ids. `fetchCardById` routes
+  on that prefix.
 - Use the quoted Lucene query form `name:"<query>"` against the TCG API. The bare
   wildcard form (`name:charizard*`) intermittently returns HTTP 500 from the
-  upstream API; the quoted form does token "contains" matching.
+  upstream API; the quoted form does token "contains" matching. Card number
+  search uses `number:"<n>"` (optional leading `#` stripped); pair with
+  `set.id:` when possible because numbers repeat across sets.
 - The TCG API (behind Cloudflare) is genuinely flaky — it randomly returns HTTP
   500 for perfectly valid requests (~1/3 of calls during testing), independent of
   query params. `searchCards` retries transient 500s/429s/network errors a few

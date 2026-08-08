@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './App.css'
-import { fetchCardById, fetchSets, searchCards, type Card, type CardSet } from './tcgapi'
+import {
+  CATALOG_LANGUAGES,
+  fetchCardById,
+  fetchSets,
+  searchCards,
+  type Card,
+  type CardSet,
+  type CatalogLanguage,
+} from './tcgapi'
+
+function languageShort(lang: CatalogLanguage | undefined): string {
+  const id = lang ?? 'en'
+  return CATALOG_LANGUAGES.find((l) => l.id === id)?.short ?? id.toUpperCase()
+}
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
@@ -25,6 +38,7 @@ import {
   removeItem,
   restoreCollectionBackup,
   saveCollection,
+  setCondition,
   setPsaGrade,
   setQuantity,
   totalCards,
@@ -94,6 +108,7 @@ function SearchResult({
       <div className="result__body">
         <h3 className="result__name">{card.name}</h3>
         <p className="result__meta">
+          <span className="badge badge--lang">{languageShort(card.language)}</span>{' '}
           {card.setName} · #{card.number}
           {card.rarity ? ` · ${card.rarity}` : ''}
         </p>
@@ -117,16 +132,33 @@ function SearchResult({
 function CollectionRow({
   item,
   onQty,
+  onCondition,
   onPsa,
   onRemove,
 }: {
   item: CollectionItem
   onQty: (key: string, qty: number) => void
+  onCondition: (key: string, condition: Condition) => void
   onPsa: (key: string, grade: PsaGrade | null) => void
   onRemove: (key: string) => void
 }) {
   const advice = gradingAdvice(item)
   const unit = item.card.marketPrice == null ? null : unitValue(item)
+  const [qtyDraft, setQtyDraft] = useState(String(item.quantity))
+
+  // Keep the typed qty field in sync when quantity changes from +/− or merges.
+  useEffect(() => {
+    setQtyDraft(String(item.quantity))
+  }, [item.quantity])
+
+  function commitQty() {
+    const n = Math.floor(Number(qtyDraft))
+    if (!Number.isFinite(n) || n < 1) {
+      setQtyDraft(String(item.quantity))
+      return
+    }
+    if (n !== item.quantity) onQty(item.key, n)
+  }
 
   return (
     <li className="crow">
@@ -141,6 +173,7 @@ function CollectionRow({
           {item.card.setName} · #{item.card.number}
         </p>
         <div className="crow__badges">
+          <span className="badge badge--lang">{languageShort(item.card.language)}</span>
           <span className={`badge badge--${item.condition.toLowerCase()}`}>
             {item.condition} · {CONDITION_LABELS[item.condition]}
           </span>
@@ -148,25 +181,72 @@ function CollectionRow({
             <span className="badge badge--psa">PSA {item.psaGrade}</span>
           )}
         </div>
-        <label className="crow__psa">
-          <span className="crow__psa-label">PSA</span>
-          <select
-            className="condition-select crow__psa-select"
-            value={item.psaGrade ?? ''}
-            aria-label={`PSA grade for ${item.card.name}`}
-            onChange={(e) => {
-              const v = e.target.value
-              onPsa(item.key, v === '' ? null : (Number(v) as PsaGrade))
-            }}
-          >
-            <option value="">Raw (ungraded)</option>
-            {PSA_GRADES.map((g) => (
-              <option key={g} value={g}>
-                PSA {g}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="crow__edit">
+          <label className="crow__field">
+            <span className="crow__field-label">Condition</span>
+            <ConditionSelect
+              value={item.condition}
+              onChange={(c) => onCondition(item.key, c)}
+              id={`cond-${item.key}`}
+            />
+          </label>
+          <label className="crow__field">
+            <span className="crow__field-label">PSA</span>
+            <select
+              className="condition-select"
+              value={item.psaGrade ?? ''}
+              aria-label={`PSA grade for ${item.card.name}`}
+              onChange={(e) => {
+                const v = e.target.value
+                onPsa(item.key, v === '' ? null : (Number(v) as PsaGrade))
+              }}
+            >
+              <option value="">Raw (ungraded)</option>
+              {PSA_GRADES.map((g) => (
+                <option key={g} value={g}>
+                  PSA {g}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="crow__field crow__field--qty">
+            <span className="crow__field-label">Qty</span>
+            <div className="qty">
+              <button
+                type="button"
+                className="qty__btn"
+                aria-label="Decrease quantity"
+                onClick={() => onQty(item.key, item.quantity - 1)}
+              >
+                −
+              </button>
+              <input
+                className="qty__input"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                value={qtyDraft}
+                aria-label={`Quantity for ${item.card.name}`}
+                onChange={(e) => setQtyDraft(e.target.value)}
+                onBlur={commitQty}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur()
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="qty__btn"
+                aria-label="Increase quantity"
+                onClick={() => onQty(item.key, item.quantity + 1)}
+              >
+                +
+              </button>
+            </div>
+          </label>
+        </div>
         {advice && (
           <p
             className={`crow__advice crow__advice--${advice.verdict}`}
@@ -178,23 +258,6 @@ function CollectionRow({
         )}
       </div>
       <div className="crow__right">
-        <div className="qty">
-          <button
-            className="qty__btn"
-            aria-label="Decrease quantity"
-            onClick={() => onQty(item.key, item.quantity - 1)}
-          >
-            −
-          </button>
-          <span className="qty__value">{item.quantity}</span>
-          <button
-            className="qty__btn"
-            aria-label="Increase quantity"
-            onClick={() => onQty(item.key, item.quantity + 1)}
-          >
-            +
-          </button>
-        </div>
         <div className="crow__values">
           {unit != null && item.quantity > 1 && (
             <span className="crow__unit">{formatUsd(unit)} ea</span>
@@ -694,9 +757,12 @@ function ScanSession({
 function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
+  const [cardNumber, setCardNumber] = useState('')
   const [setId, setSetId] = useState('')
+  const [catalogLang, setCatalogLang] = useState<CatalogLanguage>('en')
   const [sets, setSets] = useState<CardSet[]>([])
   const [setsError, setSetsError] = useState<string | null>(null)
+  const [setsLoading, setSetsLoading] = useState(false)
   const [results, setResults] = useState<Card[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -762,19 +828,34 @@ function App() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setSetsLoading(true)
+      setSetsError(null)
       try {
-        const list = await fetchSets()
-        if (!cancelled) setSets(list)
+        const list = await fetchSets(catalogLang)
+        if (!cancelled) {
+          setSets(list)
+          setSetId('')
+        }
       } catch {
-        if (!cancelled) setSetsError('Could not load sets. You can still search by name.')
+        if (!cancelled) {
+          setSets([])
+          setSetsError('Could not load sets. You can still search by name.')
+        }
+      } finally {
+        if (!cancelled) setSetsLoading(false)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [catalogLang])
 
-  async function runSearch(opts: { name?: string; setId?: string }) {
+  async function runSearch(opts: {
+    name?: string
+    setId?: string
+    number?: string
+    language?: CatalogLanguage
+  }) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -787,6 +868,8 @@ function App() {
         await searchCards({
           name: opts.name,
           setId: opts.setId,
+          number: opts.number,
+          language: opts.language ?? catalogLang,
           signal: controller.signal,
         }),
       )
@@ -827,7 +910,12 @@ function App() {
         return
       }
       setQuery(name)
-      await runSearch({ name, setId: setId || undefined })
+      await runSearch({
+        name,
+        setId: setId || undefined,
+        number: cardNumber || undefined,
+        language: catalogLang,
+      })
     } catch {
       setError('Could not read the card. Please try again or type the name.')
     } finally {
@@ -837,7 +925,12 @@ function App() {
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault()
-    await runSearch({ name: query, setId: setId || undefined })
+    await runSearch({
+      name: query,
+      setId: setId || undefined,
+      number: cardNumber || undefined,
+      language: catalogLang,
+    })
   }
 
   function handleAdd(card: Card, condition: Condition) {
@@ -997,12 +1090,36 @@ function App() {
       {tab === 'search' && (
         <section className={isHomeEmpty ? 'home-panel' : undefined}>
           <form className="search-form" onSubmit={handleSearch}>
+            <label className="set-filter lang-filter">
+              <span className="set-filter__label">Lang</span>
+              <select
+                className="condition-select set-filter__select"
+                value={catalogLang}
+                onChange={(e) => {
+                  setCatalogLang(e.target.value as CatalogLanguage)
+                  setResults([])
+                  setSearched(false)
+                  setError(null)
+                }}
+                aria-label="Catalog language"
+              >
+                {CATALOG_LANGUAGES.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="search">
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Card name (optional if set is picked)"
+                placeholder={
+                  catalogLang === 'en'
+                    ? 'Card name (optional)'
+                    : 'Name in this language (e.g. ピカチュウ)'
+                }
                 aria-label="Card name"
                 autoFocus
               />
@@ -1016,24 +1133,48 @@ function App() {
                 </button>
               )}
             </div>
-            <label className="set-filter">
-              <span className="set-filter__label">Set</span>
-              <select
-                className="condition-select set-filter__select"
-                value={setId}
-                onChange={(e) => setSetId(e.target.value)}
-                aria-label="Filter by set"
-              >
-                <option value="">All sets</option>
-                {sets.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.series ? ` (${s.series})` : ''}
+            <div className="search-filters">
+              <label className="set-filter">
+                <span className="set-filter__label">#</span>
+                <input
+                  className="set-filter__input"
+                  type="text"
+                  inputMode="text"
+                  value={cardNumber}
+                  onChange={(e) => setCardNumber(e.target.value)}
+                  placeholder="Card # (e.g. 4)"
+                  aria-label="Card number"
+                />
+              </label>
+              <label className="set-filter">
+                <span className="set-filter__label">Set</span>
+                <select
+                  className="condition-select set-filter__select"
+                  value={setId}
+                  onChange={(e) => setSetId(e.target.value)}
+                  aria-label="Filter by set"
+                  disabled={setsLoading}
+                >
+                  <option value="">
+                    {setsLoading ? 'Loading sets…' : 'All sets'}
                   </option>
-                ))}
-              </select>
-            </label>
+                  {sets.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {catalogLang === 'en' && s.series ? ` (${s.series})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             {setsError && <p className="hint">{setsError}</p>}
+            {catalogLang !== 'en' && (
+              <p className="hint lang-hint">
+                Asian catalogs come from TCGdex. Search names in that language
+                (日本語 / 中文 / 한국어). Prices are Cardmarket estimates when
+                available — coverage varies by locale.
+              </p>
+            )}
           </form>
 
           <div className="scan-buttons">
@@ -1052,12 +1193,14 @@ function App() {
           {error && <p className="error" role="alert">{error}</p>}
 
           {!error && searched && !loading && results.length === 0 && (
-            <p className="hint">No cards found. Try another name or set.</p>
+            <p className="hint">No cards found. Try another name, number, or set.</p>
           )}
 
           {!searched && !error && (
             <p className="hint">
-              Search by name, pick a set, or both. Check multiple cards to add them at once.
+              Search by name, card #, set, or any combo. Switch Lang for Japanese /
+              Chinese / Korean sets. Pair # with a set for a precise hit. Check
+              multiple cards to add them at once.
             </p>
           )}
 
@@ -1194,6 +1337,9 @@ function App() {
                   key={item.key}
                   item={item}
                   onQty={(key, qty) => setCollection((prev) => setQuantity(prev, key, qty))}
+                  onCondition={(key, condition) =>
+                    setCollection((prev) => setCondition(prev, key, condition))
+                  }
                   onPsa={(key, grade) => setCollection((prev) => setPsaGrade(prev, key, grade))}
                   onRemove={(key) => setCollection((prev) => removeItem(prev, key))}
                 />
