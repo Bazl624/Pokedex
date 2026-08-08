@@ -1118,7 +1118,7 @@ function App() {
                 placeholder={
                   catalogLang === 'en'
                     ? 'Card name (optional)'
-                    : 'Name in this language (e.g. ピカチュウ)'
+                    : 'English or local name (e.g. Flareon)'
                 }
                 aria-label="Card name"
                 autoFocus
@@ -1170,9 +1170,10 @@ function App() {
             {setsError && <p className="hint">{setsError}</p>}
             {catalogLang !== 'en' && (
               <p className="hint lang-hint">
-                Asian catalogs come from TCGdex. Search names in that language
-                (日本語 / 中文 / 한국어). Prices are Cardmarket estimates when
-                available — coverage varies by locale.
+                Asian catalogs come from TCGdex. Type an <strong>English</strong>{' '}
+                name (e.g. Flareon) or the local name — Lang filters which print
+                language you get (JP / ZH / KO). Prices are Cardmarket estimates
+                when available.
               </p>
             )}
           </form>
@@ -1199,8 +1200,8 @@ function App() {
           {!searched && !error && (
             <p className="hint">
               Search by name, card #, set, or any combo. Switch Lang for Japanese /
-              Chinese / Korean sets. Pair # with a set for a precise hit. Check
-              multiple cards to add them at once.
+              Chinese / Korean — you can still type English names. Pair # with a
+              set for a precise hit. Check multiple cards to add them at once.
             </p>
           )}
 
