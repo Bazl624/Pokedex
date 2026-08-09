@@ -351,7 +351,7 @@ export async function searchTcgdexCards(
   }
 
   const browsingSet = Boolean(setId && !name && !number)
-  const pageSize = opts.pageSize ?? (browsingSet || number ? 48 : 24)
+  const pageSize = opts.pageSize ?? (browsingSet || number ? 100 : 36)
   const setNameById = new Map<string, string>()
   const latinName = Boolean(name && looksLatinQuery(name) && lang !== 'en')
 
