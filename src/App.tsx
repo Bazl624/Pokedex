@@ -945,7 +945,7 @@ function App() {
   const [tab, setTab] = useState<Tab>('search')
   const [query, setQuery] = useState('')
   const [cardNumber, setCardNumber] = useState('')
-  const [setId, setSetId] = useState('')
+  const [selectedSetIds, setSelectedSetIds] = useState<string[]>([])
   const [catalogLang, setCatalogLang] = useState<CatalogLanguage>('en')
   const [sets, setSets] = useState<CardSet[]>([])
   const [setsError, setSetsError] = useState<string | null>(null)
@@ -1055,12 +1055,12 @@ function App() {
 
   // Reset set selection when switching catalog language.
   useEffect(() => {
-    setSetId('')
+    setSelectedSetIds([])
   }, [catalogLang])
 
   async function runSearch(opts: {
     name?: string
-    setId?: string
+    setIds?: string[]
     number?: string
     language?: CatalogLanguage
   }) {
@@ -1075,7 +1075,7 @@ function App() {
       setResults(
         await searchCards({
           name: opts.name,
-          setId: opts.setId,
+          setIds: opts.setIds,
           number: opts.number,
           language: opts.language ?? catalogLang,
           signal: controller.signal,
@@ -1120,7 +1120,7 @@ function App() {
       setQuery(name)
       await runSearch({
         name,
-        setId: setId || undefined,
+        setIds: selectedSetIds.length > 0 ? selectedSetIds : undefined,
         number: cardNumber || undefined,
         language: catalogLang,
       })
@@ -1135,10 +1135,19 @@ function App() {
     e.preventDefault()
     await runSearch({
       name: query,
-      setId: setId || undefined,
+      setIds: selectedSetIds.length > 0 ? selectedSetIds : undefined,
       number: cardNumber || undefined,
       language: catalogLang,
     })
+  }
+
+  function addSetFilter(id: string) {
+    if (!id) return
+    setSelectedSetIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+  }
+
+  function removeSetFilter(id: string) {
+    setSelectedSetIds((prev) => prev.filter((x) => x !== id))
   }
 
   function handleAdd(card: Card, condition: Condition) {
@@ -1384,26 +1393,61 @@ function App() {
                 />
               </label>
               <label className="set-filter">
-                <span className="set-filter__label">Set</span>
+                <span className="set-filter__label">Sets</span>
                 <select
                   className="condition-select set-filter__select"
-                  value={setId}
-                  onChange={(e) => setSetId(e.target.value)}
-                  aria-label="Filter by set"
+                  value=""
+                  onChange={(e) => addSetFilter(e.target.value)}
+                  aria-label="Add set filter"
                   disabled={setsLoading}
                 >
                   <option value="">
-                    {setsLoading ? 'Loading sets…' : 'All sets'}
+                    {setsLoading
+                      ? 'Loading sets…'
+                      : selectedSetIds.length > 0
+                        ? 'Add another set…'
+                        : 'Add set…'}
                   </option>
-                  {sets.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                      {catalogLang === 'en' && s.series ? ` (${s.series})` : ''}
-                    </option>
-                  ))}
+                  {sets
+                    .filter((s) => !selectedSetIds.includes(s.id))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {catalogLang === 'en' && s.series ? ` (${s.series})` : ''}
+                      </option>
+                    ))}
                 </select>
               </label>
             </div>
+            {selectedSetIds.length > 0 && (
+              <div className="set-chips" aria-label="Selected sets">
+                {selectedSetIds.map((id) => {
+                  const set = sets.find((s) => s.id === id)
+                  const label = set?.name ?? id
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="set-chip"
+                      onClick={() => removeSetFilter(id)}
+                      title={`Remove ${label}`}
+                    >
+                      <span className="set-chip__name">{label}</span>
+                      <span className="set-chip__x" aria-hidden="true">
+                        ×
+                      </span>
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  className="set-chips__clear"
+                  onClick={() => setSelectedSetIds([])}
+                >
+                  Clear sets
+                </button>
+              </div>
+            )}
             {(setsError || setsLoading) && (
               <div className="sets-status">
                 {setsLoading && (
@@ -1454,9 +1498,10 @@ function App() {
 
           {!searched && !error && (
             <p className="hint">
-              Search by name, card #, set, or any combo. Switch Lang for Japanese /
-              Chinese / Korean — you can still type English names. Pair # with a
-              set for a precise hit. Check multiple cards to add them at once.
+              Search by name, card #, and one or more sets. Add sets from the
+              dropdown (tap a chip to remove). Switch Lang for Japanese / Chinese /
+              Korean — English names still work. Check multiple cards to add them
+              at once.
             </p>
           )}
 

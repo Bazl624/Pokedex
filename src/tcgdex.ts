@@ -1,5 +1,12 @@
 import type { Card, CardSet, CatalogLanguage, SearchOptions } from './tcgapi'
 
+function setIdsFromOpts(opts: SearchOptions): string[] {
+  const fromList = (opts.setIds ?? []).map((s) => s.trim()).filter(Boolean)
+  const single = (opts.setId ?? '').trim()
+  const all = single ? [single, ...fromList] : fromList
+  return [...new Set(all)]
+}
+
 const DEX_BASE = 'https://api.tcgdex.net/v2'
 
 /** Rough EUR→USD for Cardmarket figures from TCGdex (Asian catalog). */
@@ -352,30 +359,40 @@ export async function searchTcgdexCards(
   opts: SearchOptions,
 ): Promise<Card[]> {
   const name = (opts.name ?? '').trim()
-  const setId = (opts.setId ?? '').trim()
+  const setIds = setIdsFromOpts(opts)
   const number = (opts.number ?? '').trim().replace(/^#/, '')
-  if (!name && !setId && !number) {
+  if (!name && setIds.length === 0 && !number) {
     throw new Error('Enter a card name, number, and/or pick a set to search.')
   }
 
-  const browsingSet = Boolean(setId && !name && !number)
-  const pageSize = opts.pageSize ?? (browsingSet || number ? 100 : 36)
+  const browsingSet = Boolean(setIds.length > 0 && !name && !number)
+  const pageSize =
+    opts.pageSize ??
+    (browsingSet || number ? Math.min(250, 100 * Math.max(1, setIds.length)) : 36)
   const setNameById = new Map<string, string>()
   const latinName = Boolean(name && looksLatinQuery(name) && lang !== 'en')
 
   let briefs: DexBriefCard[] = []
 
-  if (setId) {
-    const set = await fetchDexSetDetail(lang, setId, opts.signal)
-    setNameById.set(set.id, set.name)
-    let cards = set.cards ?? []
+  if (setIds.length > 0 && (browsingSet || setIds.length === 1)) {
+    // Full set payloads (best for browse / single-set filters).
+    const details = await Promise.all(
+      setIds.map((id) => fetchDexSetDetail(lang, id, opts.signal)),
+    )
+    let cards: DexBriefCard[] = []
+    let anyEmptyPayload = false
+    for (const set of details) {
+      setNameById.set(set.id, set.name)
+      const list = set.cards ?? []
+      if (list.length === 0) anyEmptyPayload = true
+      cards = cards.concat(list)
+    }
     if (number) {
       cards = cards.filter((c) => localIdMatches(c.localId, number))
     }
     if (name) {
       const q = name.toLowerCase()
       let filtered = cards.filter((c) => c.name.toLowerCase().includes(q))
-      // English name inside a Japanese/Chinese/Korean set → bridge via dexId.
       if (filtered.length === 0 && latinName) {
         const bridged = await resolveLatinNameToTargetBriefs(
           lang,
@@ -384,7 +401,9 @@ export async function searchTcgdexCards(
           opts.signal,
         )
         const matchIds = new Set(
-          bridged.filter((b) => cardBelongsToSet(b.id, setId)).map((b) => b.id),
+          bridged
+            .filter((b) => setIds.some((id) => cardBelongsToSet(b.id, id)))
+            .map((b) => b.id),
         )
         const localNames = new Set(bridged.map((b) => b.name.toLowerCase()))
         filtered = cards.filter(
@@ -394,11 +413,38 @@ export async function searchTcgdexCards(
       cards = filtered
     }
     briefs = cards.slice(0, pageSize)
-    if (briefs.length === 0 && (set.cards?.length ?? 0) === 0) {
+    if (briefs.length === 0 && anyEmptyPayload && cards.length === 0) {
       throw new Error(
         'That set has no card list in this language yet. Try another set, or search by name.',
       )
     }
+  } else if (setIds.length > 1) {
+    // Name/number across several sets — TCGdex supports set.id=a|b|c.
+    const params = new URLSearchParams({
+      'set.id': setIds.join('|'),
+      'pagination:page': '1',
+      'pagination:itemsPerPage': String(pageSize),
+    })
+    if (name) params.set('name', name)
+    if (number) {
+      params.set('localId', `eq:${numberEqCandidates(number).join('|')}`)
+    }
+    let listed = await listDexCards(lang, params, opts.signal)
+    if (number) {
+      listed = listed.filter((c) => localIdMatches(c.localId, number))
+    }
+    if (listed.length === 0 && latinName && name) {
+      const bridged = await resolveLatinNameToTargetBriefs(
+        lang,
+        name,
+        pageSize,
+        opts.signal,
+      )
+      listed = bridged.filter((b) =>
+        setIds.some((id) => cardBelongsToSet(b.id, id)),
+      )
+    }
+    briefs = listed.slice(0, pageSize)
   } else if (number && !name) {
     const candidates = numberEqCandidates(number)
     const params = new URLSearchParams({
