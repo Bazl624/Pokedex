@@ -1039,6 +1039,16 @@
   color: #1a1028;
 }
 
+.badge--dex {
+  background: #f0c26b;
+  color: #2a1c08;
+}
+
+.result__meta .badge--dex {
+  vertical-align: middle;
+  margin-right: 0.15rem;
+}
+
 .lang-filter {
   width: 100%;
 }

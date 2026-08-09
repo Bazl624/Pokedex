@@ -60,6 +60,16 @@ function languageShort(lang: CatalogLanguage | undefined): string {
   return CATALOG_LANGUAGES.find((l) => l.id === id)?.short ?? id.toUpperCase()
 }
 
+/** Visible national Pokédex badge for search + catalog cards. */
+function PokedexBadge({ n }: { n: number | null | undefined }) {
+  if (n == null) return null
+  return (
+    <span className="badge badge--dex" title="National Pokédex number">
+      Dex #{n}
+    </span>
+  )
+}
+
 function SortSelect({
   value,
   onChange,
@@ -82,7 +92,11 @@ function SortSelect({
         {SORT_OPTIONS.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
-            {o.id === 'value' ? ' (high → low)' : ' (A → Z)'}
+            {o.id === 'value'
+              ? ' (high → low)'
+              : o.id === 'pokedex'
+                ? ' (low → high)'
+                : ' (A → Z)'}
           </option>
         ))}
       </select>
@@ -273,6 +287,7 @@ function SearchResult({
         </h3>
         <p className="result__meta">
           <span className="badge badge--lang">{languageShort(card.language)}</span>{' '}
+          <PokedexBadge n={card.pokedexNumber} />{' '}
           {card.setName} · #{card.number}
           {card.rarity ? ` · ${card.rarity}` : ''}
         </p>
@@ -339,6 +354,7 @@ function CollectionRow({
         </p>
         <div className="crow__badges">
           <span className="badge badge--lang">{languageShort(item.card.language)}</span>
+          <PokedexBadge n={item.card.pokedexNumber} />
           <span className={`badge badge--${item.condition.toLowerCase()}`}>
             {item.condition} · {CONDITION_LABELS[item.condition]}
           </span>
@@ -839,7 +855,12 @@ function ScanSession({
                     )}
                     <div>
                       <strong>{selected.name}</strong>
-                      <span>{selected.setName} · #{selected.number}</span>
+                      <span>
+                        {selected.setName} · #{selected.number}
+                        {selected.pokedexNumber != null
+                          ? ` · Dex #${selected.pokedexNumber}`
+                          : ''}
+                      </span>
                       <span>NM market: {formatUsd(selected.marketPrice)}</span>
                     </div>
                   </div>
@@ -1571,7 +1592,7 @@ function App() {
                   type="search"
                   value={collectionFilter}
                   onChange={(e) => setCollectionFilter(e.target.value)}
-                  placeholder="Filter by name, set, #…"
+                  placeholder="Filter by name, set, Dex #…"
                   aria-label="Filter collection"
                 />
               </label>

@@ -40,6 +40,11 @@ export interface Card {
   marketPrice: number | null
   /** Catalog language this card was loaded from. Defaults to English. */
   language: CatalogLanguage
+  /**
+   * National Pokédex number when the card is a Pokémon (first listed if multiple).
+   * Null for trainers/energy or when the API omits it.
+   */
+  pokedexNumber: number | null
 }
 
 export interface CardSet {
@@ -61,8 +66,16 @@ interface RawCard {
   rarity?: string
   images?: { small?: string; large?: string }
   set?: { name?: string }
+  nationalPokedexNumbers?: number[]
   tcgplayer?: { prices?: Record<string, RawPriceBlock | null> }
   cardmarket?: { prices?: { averageSellPrice?: number | null; trendPrice?: number | null } }
+}
+
+function extractPokedexNumber(raw: RawCard): number | null {
+  const nums = raw.nationalPokedexNumbers
+  if (!Array.isArray(nums) || nums.length === 0) return null
+  const n = nums.find((x) => typeof x === 'number' && Number.isFinite(x))
+  return n ?? null
 }
 
 /**
@@ -96,6 +109,7 @@ function toCard(raw: RawCard): Card {
     imageLarge: raw.images?.large ?? null,
     marketPrice: extractMarketPrice(raw),
     language: 'en',
+    pokedexNumber: extractPokedexNumber(raw),
   }
 }
 

@@ -322,12 +322,13 @@ export function totalCards(items: CollectionItem[]): number {
 }
 
 /** Sort keys shared by search results and the collection list. */
-export type SortKey = 'name' | 'value' | 'set'
+export type SortKey = 'name' | 'value' | 'set' | 'pokedex'
 
 export const SORT_OPTIONS: { id: SortKey; label: string }[] = [
   { id: 'name', label: 'Name' },
   { id: 'value', label: 'Value' },
   { id: 'set', label: 'Set' },
+  { id: 'pokedex', label: 'Pokédex #' },
 ]
 
 /** Total quantity owned across all conditions/PSA lines for a card id. */
@@ -352,7 +353,15 @@ function compareCollectorNumber(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
 }
 
-/** Sort search/catalog cards. Value sorts high→low; name/set are A→Z. */
+/** National Pokédex #: low→high; missing (trainers/energy) last. */
+function comparePokedexNumber(a: number | null | undefined, b: number | null | undefined): number {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  return a - b
+}
+
+/** Sort search/catalog cards. Value high→low; Pokédex # low→high; name/set A→Z. */
 export function sortCards(cards: Card[], key: SortKey): Card[] {
   const copy = [...cards]
   copy.sort((a, b) => {
@@ -368,6 +377,13 @@ export function sortCards(cards: Card[], key: SortKey): Card[] {
         compareText(a.setName, b.setName) ||
         compareCollectorNumber(a.number, b.number) ||
         compareText(a.name, b.name)
+      )
+    }
+    if (key === 'pokedex') {
+      return (
+        comparePokedexNumber(a.pokedexNumber, b.pokedexNumber) ||
+        compareText(a.name, b.name) ||
+        compareText(a.setName, b.setName)
       )
     }
     const ap = a.marketPrice
@@ -401,6 +417,13 @@ export function sortCollectionItems(
         compareText(a.card.name, b.card.name)
       )
     }
+    if (key === 'pokedex') {
+      return (
+        comparePokedexNumber(a.card.pokedexNumber, b.card.pokedexNumber) ||
+        compareText(a.card.name, b.card.name) ||
+        compareText(a.card.setName, b.card.setName)
+      )
+    }
     const av = itemValue(a)
     const bv = itemValue(b)
     const aPriced = a.card.marketPrice != null
@@ -413,20 +436,24 @@ export function sortCollectionItems(
   return copy
 }
 
-/** Filter collection lines by name, set, number, or card id. */
+/** Filter collection lines by name, set, collector #, Pokédex #, or card id. */
 export function filterCollectionItems(
   items: CollectionItem[],
   query: string,
 ): CollectionItem[] {
   const q = query.trim().toLowerCase()
   if (!q) return items
+  const qDigits = q.replace(/^#/, '').replace(/^dex\s*#?/, '')
   return items.filter((i) => {
     const c = i.card
+    const dex =
+      c.pokedexNumber != null ? String(c.pokedexNumber) : ''
     return (
       c.name.toLowerCase().includes(q) ||
       c.setName.toLowerCase().includes(q) ||
       c.number.toLowerCase().includes(q) ||
-      c.id.toLowerCase().includes(q)
+      c.id.toLowerCase().includes(q) ||
+      (dex.length > 0 && (dex === qDigits || dex.includes(qDigits)))
     )
   })
 }
@@ -537,6 +564,11 @@ function normalizeItem(raw: Partial<CollectionItem> & { card: Card; condition: C
     marketPrice:
       typeof raw.card.marketPrice === 'number' ? raw.card.marketPrice : null,
     language: isCatalogLanguage(language) ? language : 'en',
+    pokedexNumber:
+      typeof raw.card.pokedexNumber === 'number' &&
+      Number.isFinite(raw.card.pokedexNumber)
+        ? raw.card.pokedexNumber
+        : null,
   }
   return {
     key: itemKey(card.id, condition, psaGrade),
