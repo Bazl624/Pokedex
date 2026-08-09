@@ -176,6 +176,80 @@
   border-radius: 12px;
 }
 
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.sort-control__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8ab0;
+}
+
+.sort-control__select {
+  min-width: 7.5rem;
+}
+
+.badge--owned {
+  margin-left: 0.15rem;
+  background: #7ee2a8;
+  color: #102018;
+  vertical-align: middle;
+}
+
+.result--owned {
+  outline: 1px solid rgba(126, 226, 168, 0.35);
+  outline-offset: -1px;
+}
+
+.collection-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.collection-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 12rem;
+}
+
+.collection-filter__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8ab0;
+}
+
+.collection-filter__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: #2a2a4a;
+  color: #fff;
+  outline: none;
+}
+
+.collection-filter__input:focus {
+  border-color: #6390f0;
+}
+
+.collection-filter__input::placeholder {
+  color: #6f6f96;
+}
+
 .bulk-bar__all {
   display: flex;
   align-items: center;
@@ -788,6 +862,13 @@
 .crow__name {
   margin: 0;
   font-size: 1.05rem;
+}
+
+.result__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .result__meta,

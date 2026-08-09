@@ -166,7 +166,8 @@ async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
     parts.push(`number:"${number}"`)
   }
   const browsingSet = Boolean(setId && !name && !number)
-  const pageSize = opts.pageSize ?? (browsingSet || number ? 48 : 24)
+  // Larger pages when browsing a set — collectors often add many from one set.
+  const pageSize = opts.pageSize ?? (browsingSet || number ? 100 : 36)
   const url =
     `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
     `&pageSize=${pageSize}&orderBy=number`

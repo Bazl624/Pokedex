@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import {
   CATALOG_LANGUAGES,
@@ -9,11 +9,6 @@ import {
   type CardSet,
   type CatalogLanguage,
 } from './tcgapi'
-
-function languageShort(lang: CatalogLanguage | undefined): string {
-  const id = lang ?? 'en'
-  return CATALOG_LANGUAGES.find((l) => l.id === id)?.short ?? id.toUpperCase()
-}
 import { scanCardName } from './scan'
 import { GRADE_GUIDE } from './grading'
 import {
@@ -27,19 +22,23 @@ import {
   CONDITION_LABELS,
   CONDITION_MULTIPLIERS,
   PSA_GRADES,
+  SORT_OPTIONS,
   type Condition,
   type CollectionItem,
   type PsaGrade,
+  type SortKey,
   addToCollection,
   backupCardCount,
   collectionTemplateCsv,
   collectionToCsv,
+  filterCollectionItems,
   formatUsd,
   gradingAdvice,
   hasCollectionBackup,
   itemValue,
   loadCollectionDetailed,
   mergeImportRows,
+  ownedQuantityMap,
   parseCollectionCsv,
   removeItem,
   restoreCollectionBackup,
@@ -47,12 +46,49 @@ import {
   setCondition,
   setPsaGrade,
   setQuantity,
+  sortCards,
+  sortCollectionItems,
   totalCards,
   totalValue,
   unitValue,
 } from './collection'
 
 type Tab = 'search' | 'collection' | 'guide'
+
+function languageShort(lang: CatalogLanguage | undefined): string {
+  const id = lang ?? 'en'
+  return CATALOG_LANGUAGES.find((l) => l.id === id)?.short ?? id.toUpperCase()
+}
+
+function SortSelect({
+  value,
+  onChange,
+  id,
+}: {
+  value: SortKey
+  onChange: (k: SortKey) => void
+  id?: string
+}) {
+  return (
+    <label className="sort-control">
+      <span className="sort-control__label">Sort</span>
+      <select
+        id={id}
+        className="condition-select sort-control__select"
+        value={value}
+        onChange={(e) => onChange(e.target.value as SortKey)}
+        aria-label="Sort by"
+      >
+        {SORT_OPTIONS.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+            {o.id === 'value' ? ' (high → low)' : ' (A → Z)'}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 function ConditionSelect({
   value,
@@ -195,11 +231,13 @@ function SearchResult({
   onAdd,
   selected,
   onToggle,
+  ownedQty,
 }: {
   card: Card
   onAdd: (card: Card, condition: Condition) => void
   selected: boolean
   onToggle: (id: string) => void
+  ownedQty: number
 }) {
   const [condition, setCondition] = useState<Condition>('NM')
   const estimated =
@@ -208,7 +246,9 @@ function SearchResult({
       : card.marketPrice * CONDITION_MULTIPLIERS[condition]
 
   return (
-    <li className={`result${selected ? ' result--selected' : ''}`}>
+    <li
+      className={`result${selected ? ' result--selected' : ''}${ownedQty > 0 ? ' result--owned' : ''}`}
+    >
       <label className="result__check">
         <input
           type="checkbox"
@@ -223,7 +263,14 @@ function SearchResult({
         <div className="result__img result__img--empty">No image</div>
       )}
       <div className="result__body">
-        <h3 className="result__name">{card.name}</h3>
+        <h3 className="result__name">
+          {card.name}
+          {ownedQty > 0 && (
+            <span className="badge badge--owned" title="Total copies in your catalog">
+              In catalog ×{ownedQty}
+            </span>
+          )}
+        </h3>
         <p className="result__meta">
           <span className="badge badge--lang">{languageShort(card.language)}</span>{' '}
           {card.setName} · #{card.number}
@@ -239,7 +286,7 @@ function SearchResult({
         <div className="result__actions">
           <ConditionSelect value={condition} onChange={setCondition} />
           <button className="btn btn--add" onClick={() => onAdd(card, condition)}>
-            + Add
+            {ownedQty > 0 ? '+ Add another' : '+ Add'}
           </button>
         </div>
       </div>
@@ -916,11 +963,25 @@ function App() {
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkCondition, setBulkCondition] = useState<Condition>('NM')
+  const [searchSort, setSearchSort] = useState<SortKey>('name')
+  const [collectionSort, setCollectionSort] = useState<SortKey>('name')
+  const [collectionFilter, setCollectionFilter] = useState('')
   const abortRef = useRef<AbortController | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
   /** Skip the first effect pass so a failed/empty hydrate cannot wipe storage. */
   const persistReadyRef = useRef(false)
   const loadSourceRef = useRef(bootRef.current.source)
+
+  const ownedById = useMemo(() => ownedQuantityMap(collection), [collection])
+  const sortedResults = useMemo(
+    () => sortCards(results, searchSort),
+    [results, searchSort],
+  )
+  const visibleCollection = useMemo(() => {
+    const filtered = filterCollectionItems(collection, collectionFilter)
+    return sortCollectionItems(filtered, collectionSort)
+  }, [collection, collectionFilter, collectionSort])
+  const count = totalCards(collection)
 
   useEffect(() => {
     if (!persistReadyRef.current) {
@@ -1073,19 +1134,31 @@ function App() {
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === results.length) {
+    if (selectedIds.size === sortedResults.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(results.map((c) => c.id)))
+      setSelectedIds(new Set(sortedResults.map((c) => c.id)))
     }
   }
 
   function handleAddSelected() {
-    const chosen = results.filter((c) => selectedIds.has(c.id))
+    const chosen = sortedResults.filter((c) => selectedIds.has(c.id))
     if (chosen.length === 0) return
     setCollection((prev) => {
       let next = prev
       for (const card of chosen) {
+        next = addToCollection(next, card, bulkCondition)
+      }
+      return next
+    })
+    setSelectedIds(new Set())
+  }
+
+  function handleAddAllOnPage() {
+    if (sortedResults.length === 0) return
+    setCollection((prev) => {
+      let next = prev
+      for (const card of sortedResults) {
         next = addToCollection(next, card, bulkCondition)
       }
       return next
@@ -1136,25 +1209,43 @@ function App() {
       }[] = []
       const lookupErrors: string[] = [...parsed.errors]
 
-      for (const row of parsed.rows) {
-        try {
-          const card = await fetchCardById(row.cardId)
-          if (!card) {
-            lookupErrors.push(
-              `Line ${row.lineNumber}: unknown Card ID "${row.cardId}"${row.name ? ` (${row.name})` : ''}.`,
-            )
-            continue
-          }
-          resolved.push({
-            card,
-            condition: row.condition,
-            psaGrade: row.psaGrade,
-            quantity: row.quantity,
-          })
-        } catch {
-          lookupErrors.push(
-            `Line ${row.lineNumber}: could not look up Card ID "${row.cardId}".`,
-          )
+      // Parallel lookups (batched) — serial import is too slow for ~hundreds of rows.
+      const concurrency = 8
+      for (let i = 0; i < parsed.rows.length; i += concurrency) {
+        const batch = parsed.rows.slice(i, i + concurrency)
+        setImportMsg(
+          `Importing… ${Math.min(i + batch.length, parsed.rows.length)} / ${parsed.rows.length}`,
+        )
+        const settled = await Promise.all(
+          batch.map(async (row) => {
+            try {
+              const card = await fetchCardById(row.cardId)
+              if (!card) {
+                return {
+                  ok: false as const,
+                  error: `Line ${row.lineNumber}: unknown Card ID "${row.cardId}"${row.name ? ` (${row.name})` : ''}.`,
+                }
+              }
+              return {
+                ok: true as const,
+                row: {
+                  card,
+                  condition: row.condition,
+                  psaGrade: row.psaGrade,
+                  quantity: row.quantity,
+                },
+              }
+            } catch {
+              return {
+                ok: false as const,
+                error: `Line ${row.lineNumber}: could not look up Card ID "${row.cardId}".`,
+              }
+            }
+          }),
+        )
+        for (const item of settled) {
+          if (item.ok) resolved.push(item.row)
+          else lookupErrors.push(item.error)
         }
       }
 
@@ -1175,7 +1266,6 @@ function App() {
     }
   }
 
-  const count = totalCards(collection)
   const isHomeEmpty = tab === 'search' && !searched && !loading && !error && results.length === 0
 
   return (
@@ -1349,12 +1439,14 @@ function App() {
             </p>
           )}
 
-          {results.length > 0 && (
+          {sortedResults.length > 0 && (
             <div className="bulk-bar">
               <label className="bulk-bar__all">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size > 0 && selectedIds.size === results.length}
+                  checked={
+                    selectedIds.size > 0 && selectedIds.size === sortedResults.length
+                  }
                   onChange={toggleSelectAll}
                 />
                 <span>
@@ -1363,6 +1455,7 @@ function App() {
                     : 'Select all'}
                 </span>
               </label>
+              <SortSelect value={searchSort} onChange={setSearchSort} id="search-sort" />
               <ConditionSelect value={bulkCondition} onChange={setBulkCondition} />
               <button
                 className="btn btn--add"
@@ -1372,17 +1465,26 @@ function App() {
               >
                 + Add selected ({selectedIds.size})
               </button>
+              <button
+                className="btn btn--ghost"
+                type="button"
+                onClick={handleAddAllOnPage}
+                title="Add every card on this results page"
+              >
+                + Add all on page ({sortedResults.length})
+              </button>
             </div>
           )}
 
           <ul className="results">
-            {results.map((card) => (
+            {sortedResults.map((card) => (
               <SearchResult
                 key={card.id}
                 card={card}
                 onAdd={handleAdd}
                 selected={selectedIds.has(card.id)}
                 onToggle={toggleSelected}
+                ownedQty={ownedById.get(card.id) ?? 0}
               />
             ))}
           </ul>
@@ -1460,13 +1562,36 @@ function App() {
             />
           </div>
 
+          {collection.length > 0 && (
+            <div className="collection-controls">
+              <label className="collection-filter">
+                <span className="collection-filter__label">Find</span>
+                <input
+                  className="collection-filter__input"
+                  type="search"
+                  value={collectionFilter}
+                  onChange={(e) => setCollectionFilter(e.target.value)}
+                  placeholder="Filter by name, set, #…"
+                  aria-label="Filter collection"
+                />
+              </label>
+              <SortSelect
+                value={collectionSort}
+                onChange={setCollectionSort}
+                id="collection-sort"
+              />
+            </div>
+          )}
+
           {importMsg && <p className="hint import-msg">{importMsg}</p>}
 
           {collection.length === 0 ? (
             <div className="empty-collection">
               <p className="hint">
-                Your collection is empty on this device/browser. Add cards from Search, import
-                a CSV, or restore an automatic backup if one is available.
+                Your collection is empty on this device/browser. For large inventories (~hundreds
+                of cards), use <strong>CSV import</strong> (download the template), or browse a
+                set and tap <strong>+ Add all on page</strong>. You can also use Scan session for
+                a physical pile.
               </p>
               <p className="hint empty-collection__warn">
                 Inventory is stored only in this browser (not in the cloud). Prefer{' '}
@@ -1475,9 +1600,11 @@ function App() {
                 can wipe that app’s local data.
               </p>
             </div>
+          ) : visibleCollection.length === 0 ? (
+            <p className="hint">No cards match that filter.</p>
           ) : (
             <ul className="crows">
-              {collection.map((item) => (
+              {visibleCollection.map((item) => (
                 <CollectionRow
                   key={item.key}
                   item={item}
@@ -1493,8 +1620,8 @@ function App() {
           )}
           {collection.length > 0 && (
             <p className="hint persist-tip">
-              Tip: tap <strong>Export CSV</strong> periodically — your inventory lives on this
-              device only, with an automatic on-device backup as a safety net.
+              Showing {visibleCollection.length} line(s) · {count} card(s) total. Tip: tap{' '}
+              <strong>Export CSV</strong> periodically — inventory lives on this device only.
             </p>
           )}
           <p className="disclaimer">

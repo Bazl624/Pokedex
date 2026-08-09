@@ -321,6 +321,116 @@ export function totalCards(items: CollectionItem[]): number {
   return items.reduce((sum, item) => sum + item.quantity, 0)
 }
 
+/** Sort keys shared by search results and the collection list. */
+export type SortKey = 'name' | 'value' | 'set'
+
+export const SORT_OPTIONS: { id: SortKey; label: string }[] = [
+  { id: 'name', label: 'Name' },
+  { id: 'value', label: 'Value' },
+  { id: 'set', label: 'Set' },
+]
+
+/** Total quantity owned across all conditions/PSA lines for a card id. */
+export function ownedQuantity(items: CollectionItem[], cardId: string): number {
+  return items.reduce((n, i) => (i.card.id === cardId ? n + i.quantity : n), 0)
+}
+
+/** Precompute owned totals for search-result badges (O(n) once per render). */
+export function ownedQuantityMap(items: CollectionItem[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const i of items) {
+    map.set(i.card.id, (map.get(i.card.id) ?? 0) + i.quantity)
+  }
+  return map
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: 'base' })
+}
+
+function compareCollectorNumber(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+/** Sort search/catalog cards. Value sorts high→low; name/set are A→Z. */
+export function sortCards(cards: Card[], key: SortKey): Card[] {
+  const copy = [...cards]
+  copy.sort((a, b) => {
+    if (key === 'name') {
+      return (
+        compareText(a.name, b.name) ||
+        compareText(a.setName, b.setName) ||
+        compareCollectorNumber(a.number, b.number)
+      )
+    }
+    if (key === 'set') {
+      return (
+        compareText(a.setName, b.setName) ||
+        compareCollectorNumber(a.number, b.number) ||
+        compareText(a.name, b.name)
+      )
+    }
+    const ap = a.marketPrice
+    const bp = b.marketPrice
+    if (ap == null && bp == null) return compareText(a.name, b.name)
+    if (ap == null) return 1
+    if (bp == null) return -1
+    return bp - ap || compareText(a.name, b.name)
+  })
+  return copy
+}
+
+/** Sort collection lines (view-only; does not rewrite storage order). */
+export function sortCollectionItems(
+  items: CollectionItem[],
+  key: SortKey,
+): CollectionItem[] {
+  const copy = [...items]
+  copy.sort((a, b) => {
+    if (key === 'name') {
+      return (
+        compareText(a.card.name, b.card.name) ||
+        compareText(a.card.setName, b.card.setName) ||
+        compareCollectorNumber(a.card.number, b.card.number)
+      )
+    }
+    if (key === 'set') {
+      return (
+        compareText(a.card.setName, b.card.setName) ||
+        compareCollectorNumber(a.card.number, b.card.number) ||
+        compareText(a.card.name, b.card.name)
+      )
+    }
+    const av = itemValue(a)
+    const bv = itemValue(b)
+    const aPriced = a.card.marketPrice != null
+    const bPriced = b.card.marketPrice != null
+    if (!aPriced && !bPriced) return compareText(a.card.name, b.card.name)
+    if (!aPriced) return 1
+    if (!bPriced) return -1
+    return bv - av || compareText(a.card.name, b.card.name)
+  })
+  return copy
+}
+
+/** Filter collection lines by name, set, number, or card id. */
+export function filterCollectionItems(
+  items: CollectionItem[],
+  query: string,
+): CollectionItem[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return items
+  return items.filter((i) => {
+    const c = i.card
+    return (
+      c.name.toLowerCase().includes(q) ||
+      c.setName.toLowerCase().includes(q) ||
+      c.number.toLowerCase().includes(q) ||
+      c.id.toLowerCase().includes(q)
+    )
+  })
+}
+
 export type GradingVerdict = 'yes' | 'maybe' | 'no' | 'unknown'
 
 export interface GradingAdvice {
