@@ -12,8 +12,8 @@ basic use.
   (real images, sets, rarity). Pick a **language**: English (pokemontcg.io)
   or **Japanese / Chinese / Korean** (TCGdex). For Asian langs you can type
   the **English** name (e.g. Flareon) or the local name.
-- **Sort** search results and your catalog by name, value, or set. Search
-  shows **In catalog ×N** when you already own that card.
+- **Sort** search results and your catalog by name, value, set, or
+  **Pokédex #**. Search shows **In catalog ×N** when you already own that card.
 - Large inventories: browse a set + **Add all on page**, or **CSV import**
   (parallel lookups). Filter the catalog when it gets long.
 - **Scan a card with your camera**: point your phone at a card, and the app reads

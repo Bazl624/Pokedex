@@ -234,6 +234,13 @@ function extractDexPriceUsd(detail: DexCardDetail): number | null {
   return null
 }
 
+function extractDexPokedexNumber(detail?: DexCardDetail): number | null {
+  const nums = detail?.dexId
+  if (!Array.isArray(nums) || nums.length === 0) return null
+  const n = nums.find((x) => typeof x === 'number' && Number.isFinite(x))
+  return n ?? null
+}
+
 function briefToCard(
   lang: CatalogLanguage,
   brief: DexBriefCard,
@@ -251,6 +258,7 @@ function briefToCard(
     imageLarge: imgs.imageLarge,
     marketPrice: detail ? extractDexPriceUsd(detail) : null,
     language: lang,
+    pokedexNumber: extractDexPokedexNumber(detail),
   }
 }
 
