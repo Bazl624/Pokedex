@@ -969,6 +969,18 @@
   color: #a8a8d0;
 }
 
+.sets-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sets-status__msg {
+  margin: 0;
+  text-align: left;
+}
+
 .result__meta .badge--lang {
   vertical-align: middle;
 }

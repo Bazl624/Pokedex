@@ -882,6 +882,8 @@ function App() {
   const [sets, setSets] = useState<CardSet[]>([])
   const [setsError, setSetsError] = useState<string | null>(null)
   const [setsLoading, setSetsLoading] = useState(false)
+  /** Bump to re-fetch sets after a failure (pokemontcg.io is often flaky). */
+  const [setsReloadToken, setSetsReloadToken] = useState(0)
   const [results, setResults] = useState<Card[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -953,7 +955,7 @@ function App() {
         const list = await fetchSets(catalogLang)
         if (!cancelled) {
           setSets(list)
-          setSetId('')
+          setSetsError(null)
         }
       } catch {
         if (!cancelled) {
@@ -967,6 +969,11 @@ function App() {
     return () => {
       cancelled = true
     }
+  }, [catalogLang, setsReloadToken])
+
+  // Reset set selection when switching catalog language.
+  useEffect(() => {
+    setSetId('')
   }, [catalogLang])
 
   async function runSearch(opts: {
@@ -1237,7 +1244,7 @@ function App() {
                 placeholder={
                   catalogLang === 'en'
                     ? 'Card name (optional)'
-                    : 'Name in this language (e.g. ピカチュウ)'
+                    : 'English or local name (e.g. Flareon)'
                 }
                 aria-label="Card name"
                 autoFocus
@@ -1286,12 +1293,31 @@ function App() {
                 </select>
               </label>
             </div>
-            {setsError && <p className="hint">{setsError}</p>}
+            {(setsError || setsLoading) && (
+              <div className="sets-status">
+                {setsLoading && (
+                  <p className="hint sets-status__msg">Loading sets…</p>
+                )}
+                {setsError && !setsLoading && (
+                  <>
+                    <p className="hint sets-status__msg">{setsError}</p>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => setSetsReloadToken((n) => n + 1)}
+                    >
+                      Retry sets
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             {catalogLang !== 'en' && (
               <p className="hint lang-hint">
-                Asian catalogs come from TCGdex. Search names in that language
-                (日本語 / 中文 / 한국어). Prices are Cardmarket estimates when
-                available — coverage varies by locale.
+                Asian catalogs come from TCGdex. Type an <strong>English</strong>{' '}
+                name (e.g. Flareon) or the local name — Lang filters which print
+                language you get (JP / ZH / KO). Prices are Cardmarket estimates
+                when available.
               </p>
             )}
           </form>
@@ -1318,8 +1344,8 @@ function App() {
           {!searched && !error && (
             <p className="hint">
               Search by name, card #, set, or any combo. Switch Lang for Japanese /
-              Chinese / Korean sets. Pair # with a set for a precise hit. Check
-              multiple cards to add them at once.
+              Chinese / Korean — you can still type English names. Pair # with a
+              set for a precise hit. Check multiple cards to add them at once.
             </p>
           )}
 

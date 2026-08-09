@@ -47,6 +47,10 @@ than duplicating them here.
 - Asian card ids are stored as `tcgdex:<lang>:<id>` (e.g. `tcgdex:ja:SV2a-025`)
   so they never collide with English pokemontcg.io ids. `fetchCardById` routes
   on that prefix.
+- Asian name search accepts English queries: `resolveLatinNameToTargetBriefs` in
+  `src/tcgdex.ts` tries TCGdex `anyName`, then bridges EN matches → target lang
+  via national `dexId` / same card id. Keep the Lang picker as the print-language
+  filter.
 - Use the quoted Lucene query form `name:"<query>"` against the TCG API. The bare
   wildcard form (`name:charizard*`) intermittently returns HTTP 500 from the
   upstream API; the quoted form does token "contains" matching. Card number
