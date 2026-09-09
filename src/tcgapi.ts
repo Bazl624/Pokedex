@@ -145,10 +145,12 @@ async function fetchWithRetry(
 }
 
 export interface SearchOptions {
-  /** Card name (optional if setId or number is provided). */
+  /** Card name (optional if setId(s) or number is provided). */
   name?: string
-  /** Set id filter, e.g. "base1" (optional if name or number is provided). */
+  /** Single set id filter (legacy; prefer setIds). */
   setId?: string
+  /** One or more set ids (e.g. ["base1", "base2"]). */
+  setIds?: string[]
   /**
    * Collector number within a set, e.g. "4", "25", "TG01".
    * Pair with setId when possible — the same number exists in many sets.
@@ -161,11 +163,19 @@ export interface SearchOptions {
   pageSize?: number
 }
 
+/** Normalize setId / setIds into a unique trimmed list. */
+export function normalizeSetIds(opts: Pick<SearchOptions, 'setId' | 'setIds'>): string[] {
+  const fromList = (opts.setIds ?? []).map((s) => s.trim()).filter(Boolean)
+  const single = (opts.setId ?? '').trim()
+  const all = single ? [single, ...fromList] : fromList
+  return [...new Set(all)]
+}
+
 async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
   const name = (opts.name ?? '').trim()
-  const setId = (opts.setId ?? '').trim()
+  const setIds = normalizeSetIds(opts)
   const number = (opts.number ?? '').trim().replace(/^#/, '').replace(/"/g, '')
-  if (!name && !setId && !number) {
+  if (!name && setIds.length === 0 && !number) {
     throw new Error('Enter a card name, number, and/or pick a set to search.')
   }
 
@@ -173,15 +183,22 @@ async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
   if (name) {
     parts.push(`name:"${name.replace(/"/g, '')}"`)
   }
-  if (setId) {
-    parts.push(`set.id:${setId.replace(/[^\w.-]/g, '')}`)
+  if (setIds.length === 1) {
+    parts.push(`set.id:${setIds[0].replace(/[^\w.-]/g, '')}`)
+  } else if (setIds.length > 1) {
+    const ors = setIds
+      .map((id) => `set.id:${id.replace(/[^\w.-]/g, '')}`)
+      .join(' OR ')
+    parts.push(`(${ors})`)
   }
   if (number) {
     parts.push(`number:"${number}"`)
   }
-  const browsingSet = Boolean(setId && !name && !number)
-  // Larger pages when browsing a set — collectors often add many from one set.
-  const pageSize = opts.pageSize ?? (browsingSet || number ? 100 : 36)
+  const browsingSet = Boolean(setIds.length > 0 && !name && !number)
+  // Larger pages when browsing set(s) — collectors often add many from one set.
+  const pageSize =
+    opts.pageSize ??
+    (browsingSet || number ? Math.min(250, 100 * Math.max(1, setIds.length)) : 36)
   const url =
     `${API_BASE}/cards?q=${encodeURIComponent(parts.join(' '))}` +
     `&pageSize=${pageSize}&orderBy=number`
@@ -193,7 +210,7 @@ async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
       const cards = (body.data ?? []).map(toCard)
       // Set list may have come from TCGdex fallback with ids pokemontcg.io
       // doesn't know — fall through to TCGdex when the set browse is empty.
-      if (cards.length > 0 || !setId) {
+      if (cards.length > 0 || setIds.length === 0) {
         if (browsingSet || (number && !name)) return cards
         return cards.sort((a, b) => {
           const aHas = a.marketPrice != null ? 0 : 1
@@ -205,11 +222,17 @@ async function searchEnglishCards(opts: SearchOptions): Promise<Card[]> {
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err
     // Fall through to TCGdex when pokemontcg.io is down.
-    if (!setId && !name && !number) throw err
+    if (setIds.length === 0 && !name && !number) throw err
   }
 
   // Reliable fallback (also covers TCGdex-only set ids after a sets fallback).
-  return searchTcgdexCards('en', { ...opts, language: 'en', pageSize })
+  return searchTcgdexCards('en', {
+    ...opts,
+    setIds,
+    setId: undefined,
+    language: 'en',
+    pageSize,
+  })
 }
 
 /**

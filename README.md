@@ -8,10 +8,10 @@ basic use.
 
 ## Features
 
-- Search the Pokémon TCG catalog by card name, **card #**, and/or set
-  (real images, sets, rarity). Pick a **language**: English (pokemontcg.io)
-  or **Japanese / Chinese / Korean** (TCGdex). For Asian langs you can type
-  the **English** name (e.g. Flareon) or the local name.
+- Search the Pokémon TCG catalog by card name, **card #**, and/or **one or
+  more sets** (real images, sets, rarity). Pick a **language**: English
+  (pokemontcg.io) or **Japanese / Chinese / Korean** (TCGdex). For Asian langs
+  you can type the **English** name (e.g. Flareon) or the local name.
 - **Sort** search results and your catalog by name, value, set, or
   **Pokédex #**. Search shows **In catalog ×N** when you already own that card.
 - Large inventories: browse a set + **Add all on page**, or **CSV import**

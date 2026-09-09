@@ -51,6 +51,9 @@ than duplicating them here.
   `src/tcgdex.ts` tries TCGdex `anyName`, then bridges EN matches → target lang
   via national `dexId` / same card id. Keep the Lang picker as the print-language
   filter.
+- Multi-set search uses `SearchOptions.setIds`. English Lucene:
+  `(set.id:a OR set.id:b)`. TCGdex: `set.id=a|b` or merged set-detail fetches
+  when browsing. UI adds sets via dropdown chips (`selectedSetIds` in App).
 - Use the quoted Lucene query form `name:"<query>"` against the TCG API. The bare
   wildcard form (`name:charizard*`) intermittently returns HTTP 500 from the
   upstream API; the quoted form does token "contains" matching. Card number
